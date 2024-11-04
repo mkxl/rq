@@ -1,0 +1,20 @@
+[package]
+name = "rq"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.91"
+clap = { version = "4.5.20", features = ["derive"] }
+crossterm = { version = "0.28.1", features = ["event-stream", "libc", "use-dev-tty"] }
+futures = "0.3.31"
+ratatui = "0.29.0"
+tempfile = "3.13.0"
+tokio = { version = "1.41.0", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = ["json"] }
+tui-widgets = "0.4.0"
+unicode-segmentation = "1.12.0"
+
+[lints.clippy]
+pedantic = "deny"
