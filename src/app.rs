@@ -224,6 +224,10 @@ impl App {
         }
     }
 
+    // NOTE:
+    // - Ok(Some(output)) => exit program successfully with the given output
+    // - Ok(None) => ignore the given input and continue running the program
+    // - Err(error) => exit program unsuccessfully with the given error
     async fn handle_event(&mut self, event: &Event) -> Result<Option<String>, Error> {
         match event {
             Event::Key(KeyEvent {

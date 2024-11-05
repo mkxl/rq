@@ -30,7 +30,8 @@ impl CliArgs {
     pub async fn run(self) -> Result<(), Error> {
         self.init_tracing()?;
 
-        let output_value = App::new(self.input_filepath.as_deref())?.run().await?;
+        let input_filepath = self.input_filepath.as_deref();
+        let output_value = App::new(input_filepath)?.run().await?;
 
         if let Some(output_filepath) = &self.output_filepath {
             output_value.write_all_and_flush(output_filepath.create()?)?;
