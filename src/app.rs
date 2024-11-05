@@ -167,6 +167,16 @@ impl App {
         self.render_query(frame, self.rect_set.query);
     }
 
+    fn spawn_jq_process(&self, query: &str) -> Result<(), Error> {
+        let mut jq_process = JqProcessBuilder::new(self.input_tmp_file.file()?, query, self.sender.clone()).build();
+
+        tokio::spawn(async move {
+            jq_process.run().await.log_if_error();
+        });
+
+        ().ok()
+    }
+
     async fn handle_key_event(&mut self, key_event: &KeyEvent) -> Result<Option<String>, Error> {
         let old_query_text_state_value_hash_code = self.query_text_state.value().hash_code();
 
@@ -175,16 +185,7 @@ impl App {
         let new_query_text_state_value = self.query_text_state.value();
 
         if old_query_text_state_value_hash_code != new_query_text_state_value.hash_code() {
-            let mut jq_process = JqProcessBuilder::new(
-                self.input_tmp_file.file()?,
-                new_query_text_state_value,
-                self.sender.clone(),
-            )
-            .build();
-
-            tokio::spawn(async move {
-                jq_process.run().await.log_if_error();
-            });
+            self.spawn_jq_process(new_query_text_state_value)?;
         }
 
         if !std::matches!(
@@ -243,6 +244,9 @@ impl App {
 
     pub async fn run(&mut self) -> Result<String, Error> {
         let mut terminal = Terminal::new()?;
+
+        // NOTE: spawn jq process to render initial output
+        self.spawn_jq_process("")?;
 
         loop {
             tokio::select! {
