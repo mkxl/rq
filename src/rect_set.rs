@@ -1,5 +1,6 @@
 use ratatui::layout::{Constraint, Layout, Rect};
 
+#[derive(Debug)]
 pub struct RectSet {
     pub input: Rect,
     pub output: Rect,

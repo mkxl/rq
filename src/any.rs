@@ -1,6 +1,6 @@
 use crate::lines::Lines;
 use ratatui::{
-    layout::Rect,
+    layout::{Margin, Rect},
     text::Text,
     widgets::{block::Title, Block, Paragraph, Widget},
     Frame,
@@ -17,13 +17,15 @@ use std::{
 use unicode_segmentation::UnicodeSegmentation;
 
 pub trait Any: Sized {
+    fn block<'a, T: Into<Title<'a>>>(title: T) -> Block<'a> {
+        Block::bordered().title(title)
+    }
+
     fn bordered_block<'a, T: Into<Title<'a>>>(self, title: T) -> Paragraph<'a>
     where
         Self: Into<Paragraph<'a>>,
     {
-        let block = Block::bordered().title(title);
-
-        self.into().block(block)
+        self.into().block(Self::block(title))
     }
 
     fn buf_reader(self) -> BufReader<Self>
@@ -45,6 +47,13 @@ pub trait Any: Sized {
         Self: AsRef<Path>,
     {
         File::create(self)
+    }
+
+    fn decrement(self) -> Rect
+    where
+        Self: Into<Rect>,
+    {
+        self.into().inner(Margin::new(1, 1))
     }
 
     fn first_and_last(&mut self) -> Option<(Self::Item, Self::Item)>
@@ -88,6 +97,13 @@ pub trait Any: Sized {
         };
 
         (begin, end)
+    }
+
+    fn len_chars(self) -> usize
+    where
+        Self: AsRef<str>,
+    {
+        self.as_ref().graphemes(true).count()
     }
 
     fn log_as_error(self)

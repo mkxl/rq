@@ -102,16 +102,20 @@ impl App {
         lines: &Lines<S>,
         state: &mut ScrollViewState,
     ) {
-        // TODO: handle
+        // NOTE:
+        // - scroll_view_internal_rect is the Rect used for scroll_view's internal buffer
+        // - it needs to be at least as large as both input/output rects and the rect implied by the content of lines,
+        //   ie. their max
         #[allow(clippy::cast_possible_truncation)]
-        let height = rect.height.max(lines.len() as u16);
-        let scroll_view_rect = Rect::new(0, 0, rect.width, height);
-        let mut scroll_view = ScrollView::new(scroll_view_rect.as_size());
-        let paragraph = lines.content().paragraph().bordered_block(title);
+        let scroll_view_internal_rect = lines.rect();
+        let scroll_view_external_rect = rect.decrement();
+        let mut scroll_view = ScrollView::new(scroll_view_internal_rect.as_size());
+        let paragraph = lines.content().paragraph();
+        let block = Self::block(title);
 
-        // NOTE: formerly: [paragraph.render_to(frame, rect);]
-        scroll_view.render_widget(paragraph, scroll_view_rect);
-        scroll_view.render(rect, frame.buffer_mut(), state);
+        scroll_view.render_widget(paragraph, scroll_view_internal_rect);
+        scroll_view.render(scroll_view_external_rect, frame.buffer_mut(), state);
+        block.render_to(frame, rect);
     }
 
     fn render_input(&mut self, frame: &mut Frame, rect: Rect) {
@@ -209,10 +213,14 @@ impl App {
             return;
         };
 
-        match mouse_event.kind {
-            MouseEventKind::ScrollDown => scroll_view_state.scroll_down(),
-            MouseEventKind::ScrollUp => scroll_view_state.scroll_up(),
-            ignored_mouse_event_kind => tracing::debug!(?ignored_mouse_event_kind),
+        match (mouse_event.kind, mouse_event.modifiers) {
+            (MouseEventKind::ScrollDown, KeyModifiers::CONTROL) => scroll_view_state.scroll_page_down(),
+            (MouseEventKind::ScrollUp, KeyModifiers::CONTROL) => scroll_view_state.scroll_page_up(),
+            (MouseEventKind::ScrollDown, _key_modifiers) => scroll_view_state.scroll_down(),
+            (MouseEventKind::ScrollUp, _key_modifiers) => scroll_view_state.scroll_up(),
+            (MouseEventKind::ScrollLeft, _key_modifiers) => scroll_view_state.scroll_left(),
+            (MouseEventKind::ScrollRight, _key_modifiers) => scroll_view_state.scroll_right(),
+            (ignored_mouse_event_kind, _key_modifiers) => tracing::debug!(?ignored_mouse_event_kind),
         }
     }
 
