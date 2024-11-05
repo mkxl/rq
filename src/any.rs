@@ -1,3 +1,4 @@
+use crate::lines::Lines;
 use ratatui::{
     layout::Rect,
     text::Text,
@@ -8,7 +9,7 @@ use std::{
     fmt::Display,
     fs::File,
     hash::{DefaultHasher, Hash, Hasher},
-    io::{BufReader, Error as IoError, Read},
+    io::{BufReader, Error as IoError, Read, Write},
     ops::{Bound, RangeBounds},
     path::Path,
     string::FromUtf8Error,
@@ -139,11 +140,11 @@ pub trait Any: Sized {
         string.ok()
     }
 
-    fn render_to(self, frame: &mut Frame, area: Rect)
+    fn render_to(self, frame: &mut Frame, rect: Rect)
     where
         Self: Widget,
     {
-        frame.render_widget(self, area);
+        frame.render_widget(self, rect);
     }
 
     fn some(self) -> Option<Self> {
@@ -165,6 +166,13 @@ pub trait Any: Sized {
         }
     }
 
+    fn into_lines(self) -> Lines<Self>
+    where
+        Self: AsRef<str>,
+    {
+        Lines::new(self)
+    }
+
     fn into_string(self) -> Result<String, FromUtf8Error>
     where
         Self: Into<Vec<u8>>,
@@ -172,8 +180,14 @@ pub trait Any: Sized {
         String::from_utf8(self.into())
     }
 
-    fn with<T>(&self, value: T) -> T {
-        value
+    fn write_all_and_flush<W: Write>(&self, mut writer: W) -> Result<(), IoError>
+    where
+        Self: AsRef<[u8]>,
+    {
+        writer.write_all(self.as_ref())?;
+        writer.flush()?;
+
+        ().ok()
     }
 }
 

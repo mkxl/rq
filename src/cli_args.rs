@@ -5,11 +5,13 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 pub struct CliArgs {
-    #[arg(long = "in")]
-    input_filepath: Option<PathBuf>,
-
     #[arg(long = "logs")]
     logs_filepath: Option<PathBuf>,
+
+    #[arg(long = "out")]
+    output_filepath: Option<PathBuf>,
+
+    input_filepath: Option<PathBuf>,
 }
 
 impl CliArgs {
@@ -25,9 +27,16 @@ impl CliArgs {
         ().ok()
     }
 
-    pub async fn run(&self) -> Result<(), Error> {
+    pub async fn run(self) -> Result<(), Error> {
         self.init_tracing()?;
-        App::new(self.input_filepath.as_deref())?.run().await?;
+
+        let output_value = App::new(self.input_filepath.as_deref())?.run().await?;
+
+        if let Some(output_filepath) = &self.output_filepath {
+            output_value.write_all_and_flush(output_filepath.create()?)?;
+        } else {
+            output_value.write_all_and_flush(std::io::stdout().lock())?;
+        }
 
         ().ok()
     }

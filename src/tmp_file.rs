@@ -1,15 +1,16 @@
-use crate::any::Any;
+use crate::{any::Any, lines::Lines};
 use std::{
     fs::File,
-    io::{Error as IoError, Write},
+    io::Error as IoError,
     path::{Path, PathBuf},
 };
 use tempfile::TempDir;
 
 // TODO: handle [https://docs.rs/tempfile/latest/tempfile/struct.TempDir.html#resource-leaking]
 pub struct TmpFile {
-    content: String,
+    lines: Lines,
     filepath: PathBuf,
+    #[allow(dead_code)]
     temp_dir: TempDir,
 }
 
@@ -19,8 +20,9 @@ impl TmpFile {
     pub fn new(content: String) -> Result<Self, IoError> {
         let temp_dir = tempfile::tempdir()?;
         let filepath = Self::create_file(temp_dir.path(), &content)?;
+        let lines = content.into_lines();
         let tmp_file = Self {
-            content,
+            lines,
             filepath,
             temp_dir,
         };
@@ -31,13 +33,13 @@ impl TmpFile {
     fn create_file(dirpath: &Path, content: &str) -> Result<PathBuf, IoError> {
         let filepath = dirpath.join(Self::FILENAME);
 
-        filepath.create()?.write_all(content.as_bytes())?;
+        content.as_bytes().write_all_and_flush(filepath.create()?)?;
 
         filepath.ok()
     }
 
-    pub fn content(&self) -> &str {
-        &self.content
+    pub fn lines(&self) -> &Lines {
+        &self.lines
     }
 
     pub fn file(&self) -> Result<File, IoError> {

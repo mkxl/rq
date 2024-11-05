@@ -2,6 +2,8 @@ mod any;
 mod app;
 mod cli_args;
 mod jq_process;
+mod lines;
+mod rect_set;
 mod terminal;
 mod tmp_file;
 

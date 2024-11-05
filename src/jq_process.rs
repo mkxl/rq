@@ -23,22 +23,35 @@ impl JqOutput {
     pub fn value(&self) -> &str {
         &self.value
     }
+
+    pub fn take_value(&mut self) -> String {
+        std::mem::take(&mut self.value)
+    }
 }
 
 pub struct JqProcessBuilder<'a> {
-    pub query: &'a str,
-    pub input_file: File,
-    pub sender: UnboundedSender<JqOutput>,
+    input_file: File,
+    query: &'a str,
+    sender: UnboundedSender<JqOutput>,
 }
 
 impl<'a> JqProcessBuilder<'a> {
     const JQ_EXECUTABLE_NAME: &'static str = "jq";
+    const ARGS: [&'static str; 1] = ["--compact-output"];
+
+    pub fn new(input_file: File, query: &'a str, sender: UnboundedSender<JqOutput>) -> Self {
+        Self {
+            input_file,
+            query,
+            sender,
+        }
+    }
 
     pub fn build(self) -> JqProcess {
         let instant = Instant::now();
         let mut command = Command::new(Self::JQ_EXECUTABLE_NAME);
 
-        command.arg(self.query).stdin(self.input_file);
+        command.args(Self::ARGS).arg(self.query).stdin(self.input_file);
 
         JqProcess {
             instant,
@@ -63,9 +76,7 @@ impl JqProcess {
     pub async fn run(&mut self) -> Result<(), Error> {
         let output = self.command.output().await?;
 
-        if !output.status.success() {
-            anyhow::bail!(output.stderr.into_string()?);
-        }
+        anyhow::ensure!(output.status.success(), output.stderr.into_string()?);
 
         let value = output.stdout.into_string()?;
         let jq_output = JqOutput {

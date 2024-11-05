@@ -7,9 +7,9 @@ use crossterm::{
     QueueableCommand,
 };
 use ratatui::{backend::CrosstermBackend, Terminal as RatatuiTerminal};
-use std::io::{StdoutLock, Write};
+use std::io::{StderrLock, Write};
 
-type Inner = RatatuiTerminal<CrosstermBackend<StdoutLock<'static>>>;
+type Inner = RatatuiTerminal<CrosstermBackend<StderrLock<'static>>>;
 
 pub struct Terminal {
     inner: Inner,
@@ -17,7 +17,7 @@ pub struct Terminal {
 
 impl Terminal {
     pub fn new() -> Result<Self, Error> {
-        let backend = CrosstermBackend::new(std::io::stdout().lock());
+        let backend = CrosstermBackend::new(std::io::stderr().lock());
         let inner = RatatuiTerminal::new(backend)?;
         let mut terminal = Self { inner };
 
