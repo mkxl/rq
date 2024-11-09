@@ -824,6 +824,7 @@ dependencies = [
  "anyhow",
  "clap",
  "crossterm",
+ "either",
  "futures",
  "ratatui",
  "tempfile",

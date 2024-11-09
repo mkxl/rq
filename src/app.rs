@@ -67,10 +67,11 @@ impl App {
 
     fn input_tmp_file(input_filepath: Option<&Path>) -> Result<TmpFile, IoError> {
         let content = if let Some(input_filepath) = input_filepath {
-            input_filepath.open()?.buf_reader().read_into_string()
+            input_filepath.open()?.buf_reader().left()
         } else {
-            std::io::stdin().lock().read_into_string()
-        }?;
+            std::io::stdin().lock().right()
+        }
+        .read_into_string()?;
 
         TmpFile::new(content)
     }
@@ -118,6 +119,7 @@ impl App {
         block.render_to(frame, rect);
     }
 
+    #[tracing::instrument(skip_all)]
     fn render_input(&mut self, frame: &mut Frame, rect: Rect) {
         Self::render_scroll_view(
             frame,
@@ -128,6 +130,7 @@ impl App {
         );
     }
 
+    #[tracing::instrument(skip_all)]
     fn render_output(&mut self, frame: &mut Frame, rect: Rect) {
         Self::render_scroll_view(
             frame,
@@ -143,6 +146,7 @@ impl App {
     // - [https://docs.rs/tui-prompts/0.5.0/src/tui_prompts/text_prompt.rs.html#86] TextPrompt.render() mutates TextState cursor field
     // - [https://docs.rs/tui-prompts/0.5.0/src/tui_prompts/prompt.rs.html#183] TextState.push() mutates TextState.position field
     // - i choose to render the cursor separately as i want to keep the terminal's actual cursor hidden
+    #[tracing::instrument(skip_all)]
     fn render_query(&self, frame: &mut Frame, rect: Rect) {
         let query_str = self.query_text_state.value();
         let cursor_begin = self.query_text_state.position();
@@ -159,6 +163,7 @@ impl App {
         paragraph.render_to(frame, rect);
     }
 
+    #[tracing::instrument(skip_all)]
     fn render(&mut self, frame: &mut Frame) {
         self.rect_set = RectSet::new(frame.area());
 
@@ -168,11 +173,9 @@ impl App {
     }
 
     fn spawn_jq_process(&self, query: &str) -> Result<(), Error> {
-        let mut jq_process = JqProcessBuilder::new(self.input_tmp_file.file()?, query, self.sender.clone()).build();
+        let jq_process = JqProcessBuilder::new(self.input_tmp_file.file()?, query, self.sender.clone()).build();
 
-        tokio::spawn(async move {
-            jq_process.run().await.log_if_error();
-        });
+        tokio::spawn(jq_process.run());
 
         ().ok()
     }
@@ -198,7 +201,8 @@ impl App {
             return None.ok();
         }
 
-        // NOTE: allow any recently spawned jq process to run and update self.jq_output
+        // NOTE: allow any recently spawned jq process to run and update self.jq_output before ending the program with
+        // this output value
         tokio::time::sleep(Self::INTERVAL_DURATION).await;
 
         self.jq_output.take_value().some().ok()
@@ -229,10 +233,11 @@ impl App {
     // - Ok(Some(output)) => exit program successfully with the given output
     // - Ok(None) => ignore the given input and continue running the program
     // - Err(error) => exit program unsuccessfully with the given error
+    #[tracing::instrument(skip(self), fields(?event))]
     async fn handle_event(&mut self, event: &Event) -> Result<Option<String>, Error> {
         match event {
             Event::Key(KeyEvent {
-                code: KeyCode::Char('q'),
+                code: KeyCode::Char('c'),
                 modifiers: KeyModifiers::CONTROL,
                 ..
             }) => String::new().some().ok(),

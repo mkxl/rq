@@ -2,6 +2,7 @@ use crate::any::Any;
 use anyhow::Error;
 use std::{fs::File, time::Instant};
 use tokio::{process::Command, sync::mpsc::UnboundedSender};
+use tracing::Level;
 
 pub struct JqOutput {
     instant: Instant,
@@ -73,7 +74,7 @@ impl JqProcess {
     // - figure out how to cancel previously started processes
     //   - some join!(command, other) type thing where other can be set or told to cancel on updates/new calls to
     //     this function
-    pub async fn run(&mut self) -> Result<(), Error> {
+    async fn run_helper(&mut self) -> Result<(), Error> {
         let output = self.command.output().await?;
 
         anyhow::ensure!(output.status.success(), output.stderr.into_string()?);
@@ -87,5 +88,10 @@ impl JqProcess {
         self.sender.send(jq_output)?;
 
         ().ok()
+    }
+
+    #[tracing::instrument(level = Level::WARN, skip(self), fields(command = ?self.command))]
+    pub async fn run(mut self) {
+        self.run_helper().await.log_if_error();
     }
 }

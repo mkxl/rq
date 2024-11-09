@@ -33,7 +33,7 @@ impl TmpFile {
     fn create_file(dirpath: &Path, content: &str) -> Result<PathBuf, IoError> {
         let filepath = dirpath.join(Self::FILENAME);
 
-        content.as_bytes().write_all_and_flush(filepath.create()?)?;
+        content.as_bytes().write_all_and_flush_to(filepath.create()?)?;
 
         filepath.ok()
     }

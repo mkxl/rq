@@ -2,6 +2,7 @@ use crate::{any::Any, app::App};
 use anyhow::Error;
 use clap::Parser;
 use std::path::PathBuf;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 #[derive(Parser)]
 pub struct CliArgs {
@@ -15,6 +16,12 @@ pub struct CliArgs {
 }
 
 impl CliArgs {
+    // NOTE: [FmtSpan::NEW | FmtSpan::CLOSE] isn't a constant expression and can't be used as an
+    // associated constant
+    fn fmt_span() -> FmtSpan {
+        FmtSpan::NEW | FmtSpan::CLOSE
+    }
+
     fn init_tracing(&self) -> Result<(), Error> {
         let Some(logs_filepath) = &self.logs_filepath else {
             return ().ok();
@@ -22,7 +29,11 @@ impl CliArgs {
         let logs_file = logs_filepath.create()?;
 
         // TODO: consider using tracing-appender for writing to a file
-        tracing_subscriber::fmt().with_writer(logs_file).json().init();
+        tracing_subscriber::fmt()
+            .with_span_events(Self::fmt_span())
+            .with_writer(logs_file)
+            .json()
+            .init();
 
         ().ok()
     }
@@ -34,10 +45,11 @@ impl CliArgs {
         let output_value = App::new(input_filepath)?.run().await?;
 
         if let Some(output_filepath) = &self.output_filepath {
-            output_value.write_all_and_flush(output_filepath.create()?)?;
+            output_filepath.create()?.left()
         } else {
-            output_value.write_all_and_flush(std::io::stdout().lock())?;
+            std::io::stdout().lock().right()
         }
+        .write_all_and_flush(output_value)?;
 
         ().ok()
     }

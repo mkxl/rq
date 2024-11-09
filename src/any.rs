@@ -1,4 +1,5 @@
 use crate::lines::Lines;
+use either::Either;
 use ratatui::{
     layout::{Margin, Rect},
     text::Text,
@@ -196,14 +197,29 @@ pub trait Any: Sized {
         String::from_utf8(self.into())
     }
 
-    fn write_all_and_flush<W: Write>(&self, mut writer: W) -> Result<(), IoError>
+    fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>
+    where
+        Self: Write,
+    {
+        self.write_all(data.as_ref())?;
+        self.flush()?;
+
+        ().ok()
+    }
+
+    fn write_all_and_flush_to<W: Write>(&self, mut writer: W) -> Result<(), IoError>
     where
         Self: AsRef<[u8]>,
     {
-        writer.write_all(self.as_ref())?;
-        writer.flush()?;
+        writer.write_all_and_flush(self)
+    }
 
-        ().ok()
+    fn left<R>(self) -> Either<Self, R> {
+        Either::Left(self)
+    }
+
+    fn right<L>(self) -> Either<L, Self> {
+        Either::Right(self)
     }
 }
 
