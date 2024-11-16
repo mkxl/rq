@@ -8,7 +8,7 @@ use tempfile::TempDir;
 
 // TODO: handle [https://docs.rs/tempfile/latest/tempfile/struct.TempDir.html#resource-leaking]
 pub struct TmpFile {
-    lines: Lines,
+    lines: Lines<String>,
     filepath: PathBuf,
     #[allow(dead_code)]
     temp_dir: TempDir,
@@ -20,7 +20,7 @@ impl TmpFile {
     pub fn new(content: String) -> Result<Self, IoError> {
         let temp_dir = tempfile::tempdir()?;
         let filepath = Self::create_file(temp_dir.path(), &content)?;
-        let lines = content.into_lines();
+        let lines = Lines::new(content);
         let tmp_file = Self {
             lines,
             filepath,
@@ -38,7 +38,7 @@ impl TmpFile {
         filepath.ok()
     }
 
-    pub fn lines(&self) -> &Lines {
+    pub fn lines(&self) -> &Lines<String> {
         &self.lines
     }
 

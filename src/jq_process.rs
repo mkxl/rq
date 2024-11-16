@@ -1,4 +1,4 @@
-use crate::any::Any;
+use crate::{any::Any, lines::Lines};
 use anyhow::Error;
 use std::{fs::File, time::Instant};
 use tokio::{process::Command, sync::mpsc::UnboundedSender};
@@ -6,27 +6,26 @@ use tracing::Level;
 
 pub struct JqOutput {
     instant: Instant,
-    value: String,
+    lines: Lines<String>,
 }
 
 impl JqOutput {
-    pub fn empty() -> Self {
-        let instant = Instant::now();
-        let value = String::new();
+    pub fn new(instant: Instant, content: String) -> Self {
+        let lines = Lines::new(content);
 
-        Self { instant, value }
+        Self { instant, lines }
+    }
+
+    pub fn empty() -> Self {
+        Self::new(Instant::now(), String::new())
     }
 
     pub fn instant(&self) -> Instant {
         self.instant
     }
 
-    pub fn value(&self) -> &str {
-        &self.value
-    }
-
-    pub fn take_value(&mut self) -> String {
-        std::mem::take(&mut self.value)
+    pub fn lines(&mut self) -> &mut Lines<String> {
+        &mut self.lines
     }
 }
 
@@ -79,11 +78,8 @@ impl JqProcess {
 
         anyhow::ensure!(output.status.success(), output.stderr.into_string()?);
 
-        let value = output.stdout.into_string()?;
-        let jq_output = JqOutput {
-            instant: self.instant,
-            value,
-        };
+        let content = output.stdout.into_string()?;
+        let jq_output = JqOutput::new(self.instant, content);
 
         self.sender.send(jq_output)?;
 

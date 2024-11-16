@@ -1,4 +1,3 @@
-use crate::lines::Lines;
 use either::Either;
 use ratatui::{
     layout::{Margin, Rect},
@@ -11,13 +10,13 @@ use std::{
     fs::File,
     hash::{DefaultHasher, Hash, Hasher},
     io::{BufReader, Error as IoError, Read, Write},
-    ops::{Bound, RangeBounds},
+    ops::{Bound, Range, RangeBounds},
     path::Path,
     string::FromUtf8Error,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
-pub trait Any: Sized {
+pub trait Any {
     fn block<'a, T: Into<Title<'a>>>(title: T) -> Block<'a> {
         Block::bordered().title(title)
     }
@@ -31,9 +30,23 @@ pub trait Any: Sized {
 
     fn buf_reader(self) -> BufReader<Self>
     where
-        Self: Read,
+        Self: Read + Sized,
     {
         BufReader::new(self)
+    }
+
+    // NOTE
+    // - [https://docs.rs/line-span/latest/line_span/index.html]
+    // - [https://docs.rs/line-span/latest/line_span/fn.str_to_range_unchecked.html]
+    fn byte_range(&self, substring: &str) -> Range<usize>
+    where
+        Self: AsRef<str>,
+    {
+        let string = self.as_ref();
+        let begin = (substring.as_ptr() as usize) - (string.as_ptr() as usize);
+        let end = begin + substring.len();
+
+        begin..end
     }
 
     fn convert<T>(self) -> T
@@ -55,6 +68,16 @@ pub trait Any: Sized {
         Self: Into<Rect>,
     {
         self.into().inner(Margin::new(1, 1))
+    }
+
+    fn extended_by(self, len: usize) -> Range<usize>
+    where
+        Self: Into<usize>,
+    {
+        let begin = self.into();
+        let end = begin + len;
+
+        begin..end
     }
 
     fn first_and_last(&mut self) -> Option<(Self::Item, Self::Item)>
@@ -100,14 +123,7 @@ pub trait Any: Sized {
         (begin, end)
     }
 
-    fn len_chars(self) -> usize
-    where
-        Self: AsRef<str>,
-    {
-        self.as_ref().graphemes(true).count()
-    }
-
-    fn log_as_error(self)
+    fn log_as_error(&self)
     where
         Self: Display,
     {
@@ -124,11 +140,14 @@ pub trait Any: Sized {
         }
     }
 
-    fn none<T>(self) -> Option<T> {
+    fn none<T>(&self) -> Option<T> {
         None
     }
 
-    fn ok<E>(self) -> Result<Self, E> {
+    fn ok<E>(self) -> Result<Self, E>
+    where
+        Self: Sized,
+    {
         Ok(self)
     }
 
@@ -146,6 +165,13 @@ pub trait Any: Sized {
         Paragraph::new(self)
     }
 
+    fn push_to(self, vec: &mut Vec<Self>)
+    where
+        Self: Sized,
+    {
+        vec.push(self);
+    }
+
     fn read_into_string(&mut self) -> Result<String, IoError>
     where
         Self: Read,
@@ -159,16 +185,19 @@ pub trait Any: Sized {
 
     fn render_to(self, frame: &mut Frame, rect: Rect)
     where
-        Self: Widget,
+        Self: Widget + Sized,
     {
         frame.render_widget(self, rect);
     }
 
-    fn some(self) -> Option<Self> {
+    fn some(self) -> Option<Self>
+    where
+        Self: Sized,
+    {
         Some(self)
     }
 
-    fn substr<R: RangeBounds<usize>>(&self, range: R) -> &str
+    fn substring<R: RangeBounds<usize>>(&self, range: R) -> &str
     where
         Self: AsRef<str>,
     {
@@ -183,18 +212,25 @@ pub trait Any: Sized {
         }
     }
 
-    fn into_lines(self) -> Lines<Self>
-    where
-        Self: AsRef<str>,
-    {
-        Lines::new(self)
-    }
-
     fn into_string(self) -> Result<String, FromUtf8Error>
     where
         Self: Into<Vec<u8>>,
     {
         String::from_utf8(self.into())
+    }
+
+    fn left<R>(self) -> Either<Self, R>
+    where
+        Self: Sized,
+    {
+        Either::Left(self)
+    }
+
+    fn right<L>(self) -> Either<L, Self>
+    where
+        Self: Sized,
+    {
+        Either::Right(self)
     }
 
     fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>
@@ -213,14 +249,6 @@ pub trait Any: Sized {
     {
         writer.write_all_and_flush(self)
     }
-
-    fn left<R>(self) -> Either<Self, R> {
-        Either::Left(self)
-    }
-
-    fn right<L>(self) -> Either<L, Self> {
-        Either::Right(self)
-    }
 }
 
-impl<T> Any for T {}
+impl<T: ?Sized> Any for T {}

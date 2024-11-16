@@ -9,7 +9,7 @@ use crate::{
 use anyhow::Error;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use futures::StreamExt;
-use ratatui::{layout::Rect, style::Stylize, text::Line, widgets::StatefulWidget, Frame};
+use ratatui::{layout::Rect, style::Stylize, text::Line, Frame};
 use std::{io::Error as IoError, path::Path, time::Duration};
 use tokio::{
     sync::mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender},
@@ -17,7 +17,7 @@ use tokio::{
 };
 use tui_widgets::{
     prompts::{FocusState, State, TextState},
-    scrollview::{ScrollView, ScrollViewState},
+    scrollview::ScrollViewState,
 };
 
 pub struct App {
@@ -96,7 +96,8 @@ impl App {
         }
     }
 
-    fn render_scroll_view<S: AsRef<str>>(
+    #[tracing::instrument(skip_all)]
+    fn render_scroll_view<S: AsRef<str> + Default>(
         frame: &mut Frame,
         title: &str,
         rect: Rect,
@@ -107,15 +108,22 @@ impl App {
         // - scroll_view_internal_rect is the Rect used for scroll_view's internal buffer
         // - it needs to be at least as large as both input/output rects and the rect implied by the content of lines,
         //   ie. their max
-        #[allow(clippy::cast_possible_truncation)]
-        let scroll_view_internal_rect = lines.rect();
-        let scroll_view_external_rect = rect.decrement();
-        let mut scroll_view = ScrollView::new(scroll_view_internal_rect.as_size());
-        let paragraph = lines.content().paragraph();
+
+        // let scroll_view_internal_rect = lines.rect();
+        // let scroll_view_external_rect = rect.decrement();
+        // let mut scroll_view = ScrollView::new(scroll_view_internal_rect.as_size());
+        // let paragraph = lines.content().paragraph();
+        // let block = Self::block(title);
+
+        // scroll_view.render_widget(paragraph, scroll_view_internal_rect);
+        // scroll_view.render(scroll_view_external_rect, frame.buffer_mut(), state);
+        // block.render_to(frame, rect);
+
+        let inner_rect = rect.decrement();
+        let paragraph = lines.paragraph_at(state.offset(), inner_rect);
         let block = Self::block(title);
 
-        scroll_view.render_widget(paragraph, scroll_view_internal_rect);
-        scroll_view.render(scroll_view_external_rect, frame.buffer_mut(), state);
+        paragraph.render_to(frame, inner_rect);
         block.render_to(frame, rect);
     }
 
@@ -136,7 +144,7 @@ impl App {
             frame,
             Self::OUTPUT_BLOCK_TITLE,
             rect,
-            &self.jq_output.value().into_lines(),
+            self.jq_output.lines(),
             &mut self.output_scroll_view_state,
         );
     }
@@ -151,10 +159,10 @@ impl App {
         let query_str = self.query_text_state.value();
         let cursor_begin = self.query_text_state.position();
         let cursor_end = cursor_begin.saturating_add(1);
-        let before_cursor_str_span = query_str.substr(..cursor_begin).reset();
-        let cursor_str = query_str.substr(cursor_begin..cursor_end);
+        let before_cursor_str_span = query_str.substring(..cursor_begin).reset();
+        let cursor_str = query_str.substring(cursor_begin..cursor_end);
         let cursor_str_span = (if cursor_str.is_empty() { " " } else { cursor_str }).reversed();
-        let after_cursor_str_span = query_str.substr(cursor_end..).reset();
+        let after_cursor_str_span = query_str.substring(cursor_end..).reset();
         let paragraph = std::vec![before_cursor_str_span, cursor_str_span, after_cursor_str_span]
             .convert::<Line>()
             .paragraph()
@@ -205,7 +213,7 @@ impl App {
         // this output value
         tokio::time::sleep(Self::INTERVAL_DURATION).await;
 
-        self.jq_output.take_value().some().ok()
+        self.jq_output.lines().take_content().some().ok()
     }
 
     fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {

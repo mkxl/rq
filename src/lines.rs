@@ -1,36 +1,47 @@
 use crate::any::Any;
-use ratatui::layout::Rect;
+use ratatui::{
+    layout::{Position, Rect},
+    text::Line,
+    widgets::Paragraph,
+};
+use std::ops::Range;
 
-pub struct Lines<S = String> {
+pub struct Lines<S> {
     content: S,
-    len: usize,
-    max_line_len: usize,
+    line_ranges: Vec<Range<usize>>,
 }
 
-impl<S: AsRef<str>> Lines<S> {
+impl<S: AsRef<str> + Default> Lines<S> {
     pub fn new(content: S) -> Self {
-        let mut len = 0;
-        let mut max_line_len = 0;
+        let mut line_ranges = std::vec![];
+        let content_str = content.as_ref();
 
-        for (idx, line) in content.as_ref().lines().enumerate() {
-            len = idx;
-            max_line_len = max_line_len.max(line.len_chars());
+        for line_str in content_str.lines() {
+            content_str.byte_range(line_str).push_to(&mut line_ranges);
         }
 
-        Self {
-            content,
-            len,
-            max_line_len,
-        }
+        Self { content, line_ranges }
     }
 
-    pub fn content(&self) -> &str {
-        self.content.as_ref()
+    pub fn paragraph_at(&self, offset: Position, rect: Rect) -> Paragraph {
+        let content = self.content.as_ref();
+        let substring_range = (offset.x as usize).extended_by(rect.width as usize);
+
+        // NOTE:
+        // - strings can only be indexed by Range<usize> not &Range<usize>
+        // - Range<T> does not implement Copy
+        // - thus, we must clone each line_range we iterate over to use it to index content
+        self.line_ranges
+            .iter()
+            .skip(offset.y as usize)
+            .take(rect.height as usize)
+            .cloned()
+            .map(|line_range| content[line_range].substring(substring_range.clone()).convert::<Line>())
+            .collect::<Vec<_>>()
+            .paragraph()
     }
 
-    pub fn rect(&self) -> Rect {
-        // TODO: handle cast_possible_truncation
-        #[allow(clippy::cast_possible_truncation)]
-        Rect::new(0, 0, self.max_line_len as u16, self.len as u16)
+    pub fn take_content(&mut self) -> S {
+        std::mem::take(&mut self.content)
     }
 }

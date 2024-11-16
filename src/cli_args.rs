@@ -16,11 +16,7 @@ pub struct CliArgs {
 }
 
 impl CliArgs {
-    // NOTE: [FmtSpan::NEW | FmtSpan::CLOSE] isn't a constant expression and can't be used as an
-    // associated constant
-    fn fmt_span() -> FmtSpan {
-        FmtSpan::NEW | FmtSpan::CLOSE
-    }
+    const FMT_SPAN: FmtSpan = FmtSpan::CLOSE;
 
     fn init_tracing(&self) -> Result<(), Error> {
         let Some(logs_filepath) = &self.logs_filepath else {
@@ -30,7 +26,7 @@ impl CliArgs {
 
         // TODO: consider using tracing-appender for writing to a file
         tracing_subscriber::fmt()
-            .with_span_events(Self::fmt_span())
+            .with_span_events(Self::FMT_SPAN)
             .with_writer(logs_file)
             .json()
             .init();
