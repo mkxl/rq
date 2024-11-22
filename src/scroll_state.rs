@@ -61,7 +61,7 @@ pub struct ScrollState {
 }
 
 impl ScrollState {
-    const FAST_SCROLL_COUNT: u16 = 5;
+    const LARGE_SCROLL_COUNT: u16 = 5;
     const NORMAL_SCROLL_COUNT: u16 = 1;
 
     pub fn new(content_size: Size) -> Self {
@@ -87,6 +87,16 @@ impl ScrollState {
         self.page_size = page_size;
     }
 
+    fn scroll_count(key_modifiers: KeyModifiers, page_size: u16) -> u16 {
+        if key_modifiers.intersects(KeyModifiers::CONTROL) {
+            page_size
+        } else if key_modifiers.intersects(KeyModifiers::ALT) {
+            Self::LARGE_SCROLL_COUNT
+        } else {
+            Self::NORMAL_SCROLL_COUNT
+        }
+    }
+
     fn max_offset_y(&self) -> u16 {
         self.content_size.height.saturating_sub(self.page_size.height)
     }
@@ -95,44 +105,44 @@ impl ScrollState {
         self.content_size.width.saturating_sub(self.page_size.width)
     }
 
-    pub fn scroll_up(&mut self, count: u16) {
+    fn scroll_up(&mut self, key_modifiers: KeyModifiers) {
+        let scroll_count = Self::scroll_count(key_modifiers, self.page_size.height);
+
         self.offset
             .y
-            .saturating_sub_in_place_with_max(count, self.max_offset_y());
+            .saturating_sub_in_place_with_max(scroll_count, self.max_offset_y());
     }
 
-    pub fn scroll_down(&mut self, count: u16) {
+    fn scroll_down(&mut self, key_modifiers: KeyModifiers) {
+        let scroll_count = Self::scroll_count(key_modifiers, self.page_size.height);
+
         self.offset
             .y
-            .saturating_add_in_place_with_max(count, self.max_offset_y());
+            .saturating_add_in_place_with_max(scroll_count, self.max_offset_y());
     }
 
-    pub fn scroll_left(&mut self, count: u16) {
+    fn scroll_left(&mut self, key_modifiers: KeyModifiers) {
+        let scroll_count = Self::scroll_count(key_modifiers, self.page_size.width);
+
         self.offset
             .x
-            .saturating_sub_in_place_with_max(count, self.max_offset_x());
+            .saturating_sub_in_place_with_max(scroll_count, self.max_offset_x());
     }
-    pub fn scroll_right(&mut self, count: u16) {
+    fn scroll_right(&mut self, key_modifiers: KeyModifiers) {
+        let scroll_count = Self::scroll_count(key_modifiers, self.page_size.width);
+
         self.offset
             .x
-            .saturating_add_in_place_with_max(count, self.max_offset_x());
+            .saturating_add_in_place_with_max(scroll_count, self.max_offset_x());
     }
 
     pub fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {
-        match (mouse_event.kind, mouse_event.modifiers) {
-            (MouseEventKind::ScrollDown, KeyModifiers::CONTROL) => self.scroll_down(self.page_size.height),
-            (MouseEventKind::ScrollUp, KeyModifiers::CONTROL) => self.scroll_up(self.page_size.height),
-            (MouseEventKind::ScrollLeft, KeyModifiers::CONTROL) => self.scroll_left(self.page_size.width),
-            (MouseEventKind::ScrollRight, KeyModifiers::CONTROL) => self.scroll_right(self.page_size.width),
-            (MouseEventKind::ScrollDown, KeyModifiers::ALT) => self.scroll_down(Self::FAST_SCROLL_COUNT),
-            (MouseEventKind::ScrollUp, KeyModifiers::ALT) => self.scroll_up(Self::FAST_SCROLL_COUNT),
-            (MouseEventKind::ScrollLeft, KeyModifiers::ALT) => self.scroll_left(Self::FAST_SCROLL_COUNT),
-            (MouseEventKind::ScrollRight, KeyModifiers::ALT) => self.scroll_right(Self::FAST_SCROLL_COUNT),
-            (MouseEventKind::ScrollDown, _key_modifiers) => self.scroll_down(Self::NORMAL_SCROLL_COUNT),
-            (MouseEventKind::ScrollUp, _key_modifiers) => self.scroll_up(Self::NORMAL_SCROLL_COUNT),
-            (MouseEventKind::ScrollLeft, _key_modifiers) => self.scroll_left(Self::NORMAL_SCROLL_COUNT),
-            (MouseEventKind::ScrollRight, _key_modifiers) => self.scroll_right(Self::NORMAL_SCROLL_COUNT),
-            (ignored_mouse_event_kind, _key_modifiers) => tracing::debug!(?ignored_mouse_event_kind),
+        match mouse_event.kind {
+            MouseEventKind::ScrollDown => self.scroll_down(mouse_event.modifiers),
+            MouseEventKind::ScrollUp => self.scroll_up(mouse_event.modifiers),
+            MouseEventKind::ScrollLeft => self.scroll_left(mouse_event.modifiers),
+            MouseEventKind::ScrollRight => self.scroll_right(mouse_event.modifiers),
+            ignored_mouse_event_kind => tracing::debug!(?ignored_mouse_event_kind),
         }
     }
 
