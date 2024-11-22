@@ -92,8 +92,10 @@ impl ScrollState {
         self.content_size.width.saturating_sub(self.page_size.width)
     }
 
-    pub fn scroll_up(&mut self) {
-        self.offset.y.saturating_sub_in_place_with_max(1, self.max_offset_y());
+    pub fn scroll_up(&mut self, diff: u16) {
+        self.offset
+            .y
+            .saturating_sub_in_place_with_max(diff, self.max_offset_y());
     }
 
     pub fn scroll_page_up(&mut self) {
@@ -102,8 +104,10 @@ impl ScrollState {
             .saturating_sub_in_place_with_max(self.page_size.height, self.max_offset_y());
     }
 
-    pub fn scroll_down(&mut self) {
-        self.offset.y.saturating_add_in_place_with_max(1, self.max_offset_y());
+    pub fn scroll_down(&mut self, diff: u16) {
+        self.offset
+            .y
+            .saturating_add_in_place_with_max(diff, self.max_offset_y());
     }
 
     pub fn scroll_page_down(&mut self) {
@@ -112,8 +116,10 @@ impl ScrollState {
             .saturating_add_in_place_with_max(self.page_size.height, self.max_offset_y());
     }
 
-    pub fn scroll_left(&mut self) {
-        self.offset.x.saturating_sub_in_place_with_max(1, self.max_offset_x());
+    pub fn scroll_left(&mut self, diff: u16) {
+        self.offset
+            .x
+            .saturating_sub_in_place_with_max(diff, self.max_offset_x());
     }
 
     pub fn scroll_page_left(&mut self) {
@@ -122,8 +128,10 @@ impl ScrollState {
             .saturating_sub_in_place_with_max(self.page_size.width, self.max_offset_x());
     }
 
-    pub fn scroll_right(&mut self) {
-        self.offset.x.saturating_add_in_place_with_max(1, self.max_offset_x());
+    pub fn scroll_right(&mut self, diff: u16) {
+        self.offset
+            .x
+            .saturating_add_in_place_with_max(diff, self.max_offset_x());
     }
 
     pub fn scroll_page_right(&mut self) {
@@ -138,10 +146,14 @@ impl ScrollState {
             (MouseEventKind::ScrollUp, KeyModifiers::CONTROL) => self.scroll_page_up(),
             (MouseEventKind::ScrollLeft, KeyModifiers::CONTROL) => self.scroll_page_left(),
             (MouseEventKind::ScrollRight, KeyModifiers::CONTROL) => self.scroll_page_right(),
-            (MouseEventKind::ScrollDown, _key_modifiers) => self.scroll_down(),
-            (MouseEventKind::ScrollUp, _key_modifiers) => self.scroll_up(),
-            (MouseEventKind::ScrollLeft, _key_modifiers) => self.scroll_left(),
-            (MouseEventKind::ScrollRight, _key_modifiers) => self.scroll_right(),
+            (MouseEventKind::ScrollDown, KeyModifiers::ALT) => self.scroll_down(5),
+            (MouseEventKind::ScrollUp, KeyModifiers::ALT) => self.scroll_up(5),
+            (MouseEventKind::ScrollLeft, KeyModifiers::ALT) => self.scroll_left(5),
+            (MouseEventKind::ScrollRight, KeyModifiers::ALT) => self.scroll_right(5),
+            (MouseEventKind::ScrollDown, _key_modifiers) => self.scroll_down(1),
+            (MouseEventKind::ScrollUp, _key_modifiers) => self.scroll_up(1),
+            (MouseEventKind::ScrollLeft, _key_modifiers) => self.scroll_left(1),
+            (MouseEventKind::ScrollRight, _key_modifiers) => self.scroll_right(1),
             (ignored_mouse_event_kind, _key_modifiers) => tracing::debug!(?ignored_mouse_event_kind),
         }
     }
