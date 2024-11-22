@@ -4,7 +4,9 @@ mod cli_args;
 mod jq_process;
 mod lines;
 mod rect_set;
+mod scroll_state;
 mod terminal;
+mod text_state_set;
 mod tmp_file;
 
 use crate::cli_args::CliArgs;

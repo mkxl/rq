@@ -1,4 +1,8 @@
 use either::Either;
+use num::{
+    traits::{SaturatingAdd, SaturatingSub},
+    Bounded, NumCast, ToPrimitive,
+};
 use ratatui::{
     layout::{Margin, Rect},
     text::Text,
@@ -6,6 +10,7 @@ use ratatui::{
     Frame,
 };
 use std::{
+    borrow::BorrowMut,
     fmt::Display,
     fs::File,
     hash::{DefaultHasher, Hash, Hasher},
@@ -14,18 +19,24 @@ use std::{
     path::Path,
     string::FromUtf8Error,
 };
+use tui_widgets::prompts::{State, TextState};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub trait Any {
-    fn block<'a, T: Into<Title<'a>>>(title: T) -> Block<'a> {
-        Block::bordered().title(title)
+    const IS_EXTENDED: bool = true;
+
+    fn block<'a>(self) -> Block<'a>
+    where
+        Self: Into<Title<'a>> + Sized,
+    {
+        Block::bordered().title(self)
     }
 
     fn bordered_block<'a, T: Into<Title<'a>>>(self, title: T) -> Paragraph<'a>
     where
         Self: Into<Paragraph<'a>>,
     {
-        self.into().block(Self::block(title))
+        self.into().block(title.block())
     }
 
     fn buf_reader(self) -> BufReader<Self>
@@ -49,6 +60,16 @@ pub trait Any {
         begin..end
     }
 
+    fn cast<T: Bounded + NumCast>(self) -> T
+    where
+        Self: Sized + ToPrimitive,
+    {
+        match T::from(self) {
+            Some(value) => value,
+            None => T::max_value(),
+        }
+    }
+
     fn convert<T>(self) -> T
     where
         Self: Into<T>,
@@ -68,16 +89,6 @@ pub trait Any {
         Self: Into<Rect>,
     {
         self.into().inner(Margin::new(1, 1))
-    }
-
-    fn extended_by(self, len: usize) -> Range<usize>
-    where
-        Self: Into<usize>,
-    {
-        let begin = self.into();
-        let end = begin + len;
-
-        begin..end
     }
 
     fn first_and_last(&mut self) -> Option<(Self::Item, Self::Item)>
@@ -121,6 +132,37 @@ pub trait Any {
         };
 
         (begin, end)
+    }
+
+    fn interpolate<T: Bounded + NumCast>(self, old_min: f32, old_max: f32, new_min: f32, new_max: f32) -> T
+    where
+        Self: Sized + ToPrimitive,
+    {
+        let old_value = self.cast::<f32>().clamp(old_min, old_max);
+        let new_value = new_min + (new_max - new_min) * (old_value - old_min) / (old_max - old_min);
+
+        new_value.clamp(new_min, new_max).round().cast()
+    }
+
+    fn into_string(self) -> Result<String, FromUtf8Error>
+    where
+        Self: Into<Vec<u8>>,
+    {
+        String::from_utf8(self.into())
+    }
+
+    fn left<R>(self) -> Either<Self, R>
+    where
+        Self: Sized,
+    {
+        Either::Left(self)
+    }
+
+    fn len_graphemes(&self) -> usize
+    where
+        Self: AsRef<str>,
+    {
+        self.as_ref().graphemes(Self::IS_EXTENDED).count()
     }
 
     fn log_as_error(&self)
@@ -172,6 +214,16 @@ pub trait Any {
         vec.push(self);
     }
 
+    fn range<T: ToPrimitive>(self, len: T) -> Range<usize>
+    where
+        Self: Sized + ToPrimitive,
+    {
+        let begin = self.cast();
+        let end = begin + len.cast::<usize>();
+
+        begin..end
+    }
+
     fn read_into_string(&mut self) -> Result<String, IoError>
     where
         Self: Read,
@@ -190,6 +242,27 @@ pub trait Any {
         frame.render_widget(self, rect);
     }
 
+    fn right<L>(self) -> Either<L, Self>
+    where
+        Self: Sized,
+    {
+        Either::Right(self)
+    }
+
+    fn saturating_add_in_place_with_max(&mut self, rhs: Self, max_value: Self)
+    where
+        Self: Ord + SaturatingAdd + Sized,
+    {
+        *self = self.saturating_add(&rhs).min(max_value);
+    }
+
+    fn saturating_sub_in_place_with_max(&mut self, rhs: Self, max_value: Self)
+    where
+        Self: Ord + SaturatingSub + Sized,
+    {
+        *self = self.saturating_sub(&rhs).min(max_value);
+    }
+
     fn some(self) -> Option<Self>
     where
         Self: Sized,
@@ -204,7 +277,7 @@ pub trait Any {
         let text = self.as_ref();
         let (begin, end) = range.indices(text);
         let len = end.saturating_sub(begin);
-        let mut grapheme_indices = text.grapheme_indices(true).skip(begin).take(len);
+        let mut grapheme_indices = text.grapheme_indices(Self::IS_EXTENDED).skip(begin).take(len);
 
         match grapheme_indices.first_and_last() {
             Some(((begin_idx, _begin_substr), (last_idx, _last_substr))) => &text[begin_idx..=last_idx],
@@ -212,25 +285,17 @@ pub trait Any {
         }
     }
 
-    fn into_string(self) -> Result<String, FromUtf8Error>
+    fn toggle_focus<'a>(&mut self)
     where
-        Self: Into<Vec<u8>>,
+        Self: BorrowMut<TextState<'a>>,
     {
-        String::from_utf8(self.into())
-    }
+        let text_state = self.borrow_mut();
 
-    fn left<R>(self) -> Either<Self, R>
-    where
-        Self: Sized,
-    {
-        Either::Left(self)
-    }
-
-    fn right<L>(self) -> Either<L, Self>
-    where
-        Self: Sized,
-    {
-        Either::Right(self)
+        if text_state.is_focused() {
+            text_state.blur();
+        } else {
+            text_state.focus();
+        }
     }
 
     fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>

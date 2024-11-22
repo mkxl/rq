@@ -38,8 +38,8 @@ impl TmpFile {
         filepath.ok()
     }
 
-    pub fn lines(&self) -> &Lines<String> {
-        &self.lines
+    pub fn lines_mut(&mut self) -> &mut Lines<String> {
+        &mut self.lines
     }
 
     pub fn file(&self) -> Result<File, IoError> {

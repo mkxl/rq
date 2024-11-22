@@ -2,7 +2,6 @@ use crate::{any::Any, lines::Lines};
 use anyhow::Error;
 use std::{fs::File, time::Instant};
 use tokio::{process::Command, sync::mpsc::UnboundedSender};
-use tracing::Level;
 
 pub struct JqOutput {
     instant: Instant,
@@ -24,40 +23,36 @@ impl JqOutput {
         self.instant
     }
 
-    pub fn lines(&mut self) -> &mut Lines<String> {
+    pub fn lines_mut(&mut self) -> &mut Lines<String> {
         &mut self.lines
     }
 }
 
 pub struct JqProcessBuilder<'a> {
-    input_file: File,
-    query: &'a str,
-    sender: UnboundedSender<JqOutput>,
+    pub input_file: File,
+    pub flags: &'a str,
+    pub query: &'a str,
+    pub sender: UnboundedSender<JqOutput>,
 }
 
 impl<'a> JqProcessBuilder<'a> {
     const JQ_EXECUTABLE_NAME: &'static str = "jq";
-    const ARGS: [&'static str; 1] = ["--compact-output"];
 
-    pub fn new(input_file: File, query: &'a str, sender: UnboundedSender<JqOutput>) -> Self {
-        Self {
-            input_file,
-            query,
-            sender,
-        }
-    }
-
-    pub fn build(self) -> JqProcess {
+    pub fn build(self) -> Result<JqProcess, Error> {
         let instant = Instant::now();
-        let mut command = Command::new(Self::JQ_EXECUTABLE_NAME);
-
-        command.args(Self::ARGS).arg(self.query).stdin(self.input_file);
-
-        JqProcess {
+        let command = Command::new(Self::JQ_EXECUTABLE_NAME);
+        let Some(args) = shlex::split(self.flags) else {
+            anyhow::bail!("unable to split flags for the shell")
+        };
+        let mut jq_process = JqProcess {
             instant,
             command,
             sender: self.sender,
-        }
+        };
+
+        jq_process.command.args(args).arg(self.query).stdin(self.input_file);
+
+        jq_process.ok()
     }
 }
 
@@ -86,7 +81,7 @@ impl JqProcess {
         ().ok()
     }
 
-    #[tracing::instrument(level = Level::WARN, skip(self), fields(command = ?self.command))]
+    #[tracing::instrument(skip_all, fields(command = ?self.command))]
     pub async fn run(mut self) {
         self.run_helper().await.log_if_error();
     }
