@@ -61,10 +61,13 @@ impl App {
     }
 
     fn input_tmp_file(input_filepath: Option<&Path>, jq_cli_args: &JqCliArgs) -> Result<TmpFile, IoError> {
-        let content = if jq_cli_args.null_input {
-            String::new()
-        } else if let Some(input_filepath) = input_filepath {
+        // NOTE:
+        // - if both an input filepath and `--null-input` are supplied, let `jq` determine what the output should be
+        // - otherwise, if no input filepath is supplied, but `--null-input` is, definitely do not read from stdin
+        let content = if let Some(input_filepath) = input_filepath {
             input_filepath.open()?.buf_reader().read_into_string()?
+        } else if jq_cli_args.null_input {
+            String::new()
         } else {
             std::io::stdin().lock().read_into_string()?
         };

@@ -49,6 +49,7 @@ impl TextStateSet {
 
         text_state.handle_key_event(key_event);
 
+        // NOTE: return did the content change
         prev_hash_code != text_state.hash_code()
     }
 }
