@@ -154,17 +154,17 @@ impl App {
     }
 
     fn spawn_jq_process(&self) -> Result<(), Error> {
-        let jq_process = JqProcessBuilder {
+        JqProcessBuilder {
             input_file: self.input_tmp_file.file()?,
             flags: self.text_state_set.flags().value(),
             query: self.text_state_set.query().value(),
             sender: self.sender.clone(),
         }
-        .build()?;
-
-        tokio::spawn(jq_process.run());
-
-        ().ok()
+        .build()?
+        .run()
+        .spawn()
+        .unit()
+        .ok()
     }
 
     async fn handle_key_event(&mut self, key_event: &KeyEvent) -> Result<Option<String>, Error> {

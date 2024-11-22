@@ -13,12 +13,14 @@ use std::{
     borrow::BorrowMut,
     fmt::Display,
     fs::File,
+    future::Future,
     hash::{DefaultHasher, Hash, Hasher},
     io::{BufReader, Error as IoError, Read, Write},
     ops::{Bound, Range, RangeBounds},
     path::Path,
     string::FromUtf8Error,
 };
+use tokio::task::JoinHandle;
 use tui_widgets::prompts::{State, TextState};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -270,6 +272,14 @@ pub trait Any {
         Some(self)
     }
 
+    fn spawn(self) -> JoinHandle<Self::Output>
+    where
+        Self: 'static + Future + Sized + Send,
+        Self::Output: 'static + Send,
+    {
+        tokio::spawn(self)
+    }
+
     fn substring<R: RangeBounds<usize>>(&self, range: R) -> &str
     where
         Self: AsRef<str>,
@@ -297,6 +307,8 @@ pub trait Any {
             text_state.focus();
         }
     }
+
+    fn unit(&self) {}
 
     fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>
     where
