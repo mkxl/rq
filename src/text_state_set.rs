@@ -1,4 +1,4 @@
-use crate::any::Any;
+use crate::{any::Any, cli_args::JqCliArgs};
 use crossterm::event::KeyEvent;
 use tui_widgets::prompts::{FocusState, State, TextState};
 
@@ -10,18 +10,20 @@ pub struct TextStateSet {
 impl TextStateSet {
     const INITIAL_FOCUSED_FLAGS: FocusState = FocusState::Unfocused;
     const INITIAL_FOCUSED_QUERY: FocusState = FocusState::Focused;
-    const INITIAL_VALUE_FLAGS: &'static str = "--compact-output";
-    const INITIAL_VALUE_QUERY: &'static str = "";
 
-    pub fn new() -> Self {
+    pub fn new(jq_cli_args: &JqCliArgs, initial_query: String) -> Self {
         Self {
-            flags: Self::text_state(Self::INITIAL_FOCUSED_FLAGS, Self::INITIAL_VALUE_FLAGS),
-            query: Self::text_state(Self::INITIAL_FOCUSED_QUERY, Self::INITIAL_VALUE_QUERY),
+            flags: Self::text_state(Self::INITIAL_FOCUSED_FLAGS, jq_cli_args.to_string()),
+            query: Self::text_state(Self::INITIAL_FOCUSED_QUERY, initial_query),
         }
     }
 
-    fn text_state(focus_state: FocusState, value: &str) -> TextState {
-        TextState::new().with_focus(focus_state).with_value(value)
+    fn text_state(focus_state: FocusState, value: String) -> TextState<'static> {
+        let mut text_state = TextState::new().with_focus(focus_state).with_value(value);
+
+        text_state.move_end();
+
+        text_state
     }
 
     pub fn flags(&self) -> &TextState<'static> {

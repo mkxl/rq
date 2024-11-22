@@ -1,5 +1,6 @@
 use crate::{
     any::Any,
+    cli_args::JqCliArgs,
     jq_process::{JqOutput, JqProcessBuilder},
     lines::Lines,
     rect_set::RectSet,
@@ -37,14 +38,14 @@ impl App {
     const FLAGS_BLOCK_TITLE: &'static str = "FLAGS";
     const QUERY_BLOCK_TITLE: &'static str = "QUERY";
 
-    pub fn new(input_filepath: Option<&Path>) -> Result<Self, Error> {
+    pub fn new(input_filepath: Option<&Path>, jq_cli_args: &JqCliArgs, query: String) -> Result<Self, Error> {
         let event_stream = EventStream::new();
-        let input_tmp_file = Self::input_tmp_file(input_filepath)?;
+        let input_tmp_file = Self::input_tmp_file(input_filepath, jq_cli_args)?;
         let interval = Self::interval();
         let jq_output = JqOutput::empty();
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         let rect_set = RectSet::empty();
-        let text_state_set = TextStateSet::new();
+        let text_state_set = TextStateSet::new(jq_cli_args, query);
         let app = Self {
             event_stream,
             input_tmp_file,
@@ -59,13 +60,14 @@ impl App {
         app.ok()
     }
 
-    fn input_tmp_file(input_filepath: Option<&Path>) -> Result<TmpFile, IoError> {
-        let content = if let Some(input_filepath) = input_filepath {
-            input_filepath.open()?.buf_reader().left()
+    fn input_tmp_file(input_filepath: Option<&Path>, jq_cli_args: &JqCliArgs) -> Result<TmpFile, IoError> {
+        let content = if jq_cli_args.null_input {
+            String::new()
+        } else if let Some(input_filepath) = input_filepath {
+            input_filepath.open()?.buf_reader().read_into_string()?
         } else {
-            std::io::stdin().lock().right()
-        }
-        .read_into_string()?;
+            std::io::stdin().lock().read_into_string()?
+        };
 
         TmpFile::new(content)
     }
