@@ -65,8 +65,8 @@ pub struct CliArgs {
     #[command(flatten)]
     jq_cli_args: JqCliArgs,
 
-    #[arg(default_value = "", long)]
-    query: String,
+    #[arg(long)]
+    query: Option<String>,
 
     input_filepath: Option<PathBuf>,
 }

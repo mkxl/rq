@@ -38,7 +38,7 @@ impl App {
     const FLAGS_BLOCK_TITLE: &'static str = "FLAGS";
     const QUERY_BLOCK_TITLE: &'static str = "QUERY";
 
-    pub fn new(input_filepath: Option<&Path>, jq_cli_args: &JqCliArgs, query: String) -> Result<Self, Error> {
+    pub fn new(input_filepath: Option<&Path>, jq_cli_args: &JqCliArgs, query: Option<String>) -> Result<Self, Error> {
         let event_stream = EventStream::new();
         let input_tmp_file = Self::input_tmp_file(input_filepath, jq_cli_args)?;
         let interval = Self::interval();
