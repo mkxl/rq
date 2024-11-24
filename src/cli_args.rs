@@ -85,9 +85,9 @@ impl CliArgs {
             .with_span_events(Self::FMT_SPAN)
             .with_writer(logs_file)
             .json()
-            .init();
-
-        ().ok()
+            .init()
+            .unit()
+            .ok()
     }
 
     pub async fn run(self) -> Result<(), Error> {
@@ -95,14 +95,12 @@ impl CliArgs {
 
         let input_filepath = self.input_filepath.as_deref();
         let output_value = App::new(input_filepath, &self.jq_cli_args, self.query)?.run().await?;
-
-        if let Some(output_filepath) = &self.output_filepath {
+        let writer = if let Some(output_filepath) = &self.output_filepath {
             output_filepath.create()?.left()
         } else {
             std::io::stdout().lock().right()
-        }
-        .write_all_and_flush(output_value)?;
+        };
 
-        ().ok()
+        output_value.write_all_and_flush_to(writer)?.ok()
     }
 }

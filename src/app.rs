@@ -128,9 +128,13 @@ impl App {
             cursor_str.reset()
         };
         let after_cursor_str_span = query_str.substring(cursor_end..).reset();
-        let line = std::vec![before_cursor_str_span, cursor_str_span, after_cursor_str_span].convert::<Line>();
+        let spans = std::vec![before_cursor_str_span, cursor_str_span, after_cursor_str_span];
 
-        line.paragraph().bordered_block(title).render_to(frame, rect);
+        spans
+            .convert::<Line>()
+            .paragraph()
+            .bordered_block(title)
+            .render_to(frame, rect);
     }
 
     #[tracing::instrument(skip_all)]
