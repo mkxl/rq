@@ -1,12 +1,12 @@
 use crate::{
     any::Any,
     cli_args::JqCliArgs,
+    input::Input,
     jq_process::{JqOutput, JqProcessBuilder},
-    lines::Lines,
     rect_set::RectSet,
+    scroll::ScrollView,
     terminal::Terminal,
     text_state_set::TextStateSet,
-    tmp_file::TmpFile,
 };
 use anyhow::Error;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
@@ -21,7 +21,8 @@ use tui_widgets::prompts::{State, TextState};
 
 pub struct App {
     event_stream: EventStream,
-    input_tmp_file: TmpFile,
+    input: Input,
+    input_scroll_view: ScrollView,
     interval: Interval,
     jq_output: JqOutput,
     receiver: UnboundedReceiver<JqOutput>,
@@ -31,16 +32,21 @@ pub struct App {
 }
 
 impl App {
-    const BAIL_MESSAGE: &'static str = "quitting!";
+    const FLAGS_BLOCK_TITLE: &'static str = "FLAGS";
     const INPUT_BLOCK_TITLE: &'static str = "INPUT";
     const INTERVAL_DURATION: Duration = Duration::from_millis(50);
     const OUTPUT_BLOCK_TITLE: &'static str = "OUTPUT";
-    const FLAGS_BLOCK_TITLE: &'static str = "FLAGS";
     const QUERY_BLOCK_TITLE: &'static str = "QUERY";
+    const QUIT_MESSAGE: &'static str = "quitting!";
 
-    pub fn new(input_filepath: Option<&Path>, jq_cli_args: &JqCliArgs, query: Option<String>) -> Result<Self, Error> {
+    pub async fn new(
+        input_filepath: Option<&Path>,
+        jq_cli_args: &JqCliArgs,
+        query: Option<String>,
+    ) -> Result<Self, Error> {
         let event_stream = EventStream::new();
-        let input_tmp_file = Self::input_tmp_file(input_filepath, jq_cli_args)?;
+        let input = Self::input(input_filepath, jq_cli_args).await?;
+        let input_scroll_view = ScrollView::new();
         let interval = Self::interval();
         let jq_output = JqOutput::empty();
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
@@ -48,7 +54,8 @@ impl App {
         let text_state_set = TextStateSet::new(jq_cli_args, query);
         let app = Self {
             event_stream,
-            input_tmp_file,
+            input,
+            input_scroll_view,
             interval,
             jq_output,
             receiver,
@@ -60,19 +67,19 @@ impl App {
         app.ok()
     }
 
-    fn input_tmp_file(input_filepath: Option<&Path>, jq_cli_args: &JqCliArgs) -> Result<TmpFile, IoError> {
+    async fn input(input_filepath: Option<&Path>, jq_cli_args: &JqCliArgs) -> Result<Input, IoError> {
         // NOTE:
         // - if both an input filepath and `--null-input` are supplied, let `jq` determine what the output should be
+        //   by supplying both stdin and the --null-input flag
         // - otherwise, if no input filepath is supplied, but `--null-input` is, definitely do not read from stdin
-        let content = if let Some(input_filepath) = input_filepath {
-            input_filepath.open()?.buf_reader().read_into_string()?
+        if let Some(input_filepath) = input_filepath {
+            Input::from_filepath(input_filepath).await?
         } else if jq_cli_args.null_input {
-            String::new()
+            Input::empty()
         } else {
-            std::io::stdin().lock().read_into_string()?
-        };
-
-        TmpFile::new(content)
+            Input::from_stdin()
+        }
+        .ok()
     }
 
     fn interval() -> Interval {
@@ -86,28 +93,25 @@ impl App {
             Err(try_recv_error) => return try_recv_error.log_as_error(),
         };
 
+        // NOTE: keep scroll offset if the output changes
         if self.jq_output.instant() < new_jq_output.instant() {
-            let offset = self.jq_output.lines_mut().scroll_state_mut().offset();
-
-            self.jq_output = new_jq_output;
-
-            self.jq_output.lines_mut().scroll_state_mut().set_offset(offset);
+            self.jq_output = new_jq_output.with_scroll_view_offset(&self.jq_output);
         }
     }
 
-    fn render_scroll_view<S: AsRef<str> + Default>(frame: &mut Frame, rect: Rect, title: &str, lines: &mut Lines<S>) {
-        lines.render_scroll_view(frame, rect.decrement());
+    fn render_scroll_view(frame: &mut Frame, rect: Rect, title: &str, scroll_view: &mut ScrollView) {
+        scroll_view.render(frame, rect.decrement());
         title.block().render_to(frame, rect);
     }
 
     #[tracing::instrument(skip_all)]
     fn render_input(&mut self, frame: &mut Frame, rect: Rect) {
-        Self::render_scroll_view(frame, rect, Self::INPUT_BLOCK_TITLE, self.input_tmp_file.lines_mut());
+        Self::render_scroll_view(frame, rect, Self::INPUT_BLOCK_TITLE, &mut self.input_scroll_view);
     }
 
     #[tracing::instrument(skip_all)]
     fn render_output(&mut self, frame: &mut Frame, rect: Rect) {
-        Self::render_scroll_view(frame, rect, Self::OUTPUT_BLOCK_TITLE, self.jq_output.lines_mut());
+        Self::render_scroll_view(frame, rect, Self::OUTPUT_BLOCK_TITLE, self.jq_output.scroll_view_mut());
     }
 
     // NOTE:
@@ -158,15 +162,16 @@ impl App {
     }
 
     fn spawn_jq_process(&self) -> Result<(), Error> {
+        // TODO: figure out how to supply input without cloning data
         JqProcessBuilder {
-            input_file: self.input_tmp_file.file()?,
             flags: self.text_state_set.flags().value(),
             query: self.text_state_set.query().value(),
+            input: self.input_scroll_view.content().as_bytes().to_vec(),
             sender: self.sender.clone(),
         }
         .build()?
         .run()
-        .spawn()
+        .spawn_task()
         .unit()
         .ok()
     }
@@ -190,20 +195,19 @@ impl App {
         // this output value
         tokio::time::sleep(Self::INTERVAL_DURATION).await;
 
-        self.jq_output.lines_mut().take_content().some().ok()
+        self.jq_output.scroll_view_mut().take_content().some().ok()
     }
 
     fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {
         let position = (mouse_event.column, mouse_event.row).into();
 
         if self.rect_set.input.contains(position) {
-            self.input_tmp_file.lines_mut()
+            &mut self.input_scroll_view
         } else if self.rect_set.output.contains(position) {
-            self.jq_output.lines_mut()
+            self.jq_output.scroll_view_mut()
         } else {
             return;
         }
-        .scroll_state_mut()
         .handle_mouse_event(mouse_event);
     }
 
@@ -218,7 +222,7 @@ impl App {
                 code: KeyCode::Char('c'),
                 modifiers: KeyModifiers::CONTROL,
                 ..
-            }) => anyhow::bail!(Self::BAIL_MESSAGE),
+            }) => anyhow::bail!(Self::QUIT_MESSAGE),
             Event::Key(KeyEvent { code: KeyCode::Tab, .. }) => self.text_state_set.toggle_focus().none().ok(),
             Event::Key(key_event) => self.handle_key_event(key_event).await,
             Event::Mouse(mouse_event) => self.handle_mouse_event(*mouse_event).none().ok(),
@@ -239,11 +243,15 @@ impl App {
                     terminal.inner().draw(|frame| self.render(frame))?;
                 }
                 event_res_opt = self.event_stream.next() => {
-                    let Some(event_res) = event_res_opt else { anyhow::bail!("event stream ended unexpectedly"); };
+                    let Some(event_res) = event_res_opt else { anyhow::bail!("event stream unexpectedly closed") };
 
                     if let Some(output_content) = self.handle_event(&event_res?).await? {
                         return output_content.ok();
                     }
+                }
+                line_res = self.input.next_line() => {
+                    self.input_scroll_view.push_line(&line_res?);
+                    self.spawn_jq_process()?;
                 }
             }
         }

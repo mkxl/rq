@@ -75,9 +75,7 @@ impl CliArgs {
     const FMT_SPAN: FmtSpan = FmtSpan::CLOSE;
 
     fn init_tracing(&self) -> Result<(), Error> {
-        let Some(logs_filepath) = &self.logs_filepath else {
-            return ().ok();
-        };
+        let Some(logs_filepath) = &self.logs_filepath else { return ().ok() };
         let logs_file = logs_filepath.create()?;
 
         // TODO: consider using tracing-appender for writing to a file
@@ -86,7 +84,6 @@ impl CliArgs {
             .with_writer(logs_file)
             .json()
             .init()
-            .unit()
             .ok()
     }
 
@@ -94,13 +91,16 @@ impl CliArgs {
         self.init_tracing()?;
 
         let input_filepath = self.input_filepath.as_deref();
-        let output_value = App::new(input_filepath, &self.jq_cli_args, self.query)?.run().await?;
-        let writer = if let Some(output_filepath) = &self.output_filepath {
-            output_filepath.create()?.left()
+        let output_value = App::new(input_filepath, &self.jq_cli_args, self.query)
+            .await?
+            .run()
+            .await?;
+        let mut writer = if let Some(output_filepath) = &self.output_filepath {
+            output_filepath.create_tokio().await?.left_tokio()
         } else {
-            std::io::stdout().lock().right()
+            tokio::io::stdout().right_tokio()
         };
 
-        output_value.write_all_and_flush_to(writer)?.ok()
+        writer.write_all_and_flush(output_value).await?.ok()
     }
 }

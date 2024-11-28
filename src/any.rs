@@ -1,4 +1,3 @@
-use either::Either;
 use num::{
     traits::{SaturatingAdd, SaturatingSub},
     Bounded, NumCast, ToPrimitive,
@@ -15,17 +14,31 @@ use std::{
     fs::File,
     future::Future,
     hash::{DefaultHasher, Hash, Hasher},
-    io::{BufReader, Error as IoError, Read, Write},
+    io::Error as IoError,
+    marker::Unpin,
     ops::{Bound, Range, RangeBounds},
     path::Path,
+    str::Utf8Error,
     string::FromUtf8Error,
 };
-use tokio::task::JoinHandle;
+use tokio::{
+    fs::File as TokioFile,
+    io::{AsyncRead, AsyncWriteExt, BufReader as TokioBufReader},
+    task::JoinHandle,
+};
+use tokio_util::either::Either as TokioEither;
 use tui_widgets::prompts::{State, TextState};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub trait Any {
     const IS_EXTENDED: bool = true;
+
+    fn as_str(&self) -> Result<&str, Utf8Error>
+    where
+        Self: AsRef<[u8]>,
+    {
+        std::str::from_utf8(self.as_ref())
+    }
 
     fn block<'a>(self) -> Block<'a>
     where
@@ -41,25 +54,11 @@ pub trait Any {
         self.into().block(title.block())
     }
 
-    fn buf_reader(self) -> BufReader<Self>
+    fn buf_reader_tokio(self) -> TokioBufReader<Self>
     where
-        Self: Read + Sized,
+        Self: AsyncRead + Sized,
     {
-        BufReader::new(self)
-    }
-
-    // NOTE
-    // - [https://docs.rs/line-span/latest/line_span/index.html]
-    // - [https://docs.rs/line-span/latest/line_span/fn.str_to_range_unchecked.html]
-    fn byte_range(&self, substring: &str) -> Range<usize>
-    where
-        Self: AsRef<str>,
-    {
-        let string = self.as_ref();
-        let begin = (substring.as_ptr() as usize) - (string.as_ptr() as usize);
-        let end = begin + substring.len();
-
-        begin..end
+        TokioBufReader::new(self)
     }
 
     fn cast<T: Bounded + NumCast>(self) -> T
@@ -84,6 +83,13 @@ pub trait Any {
         Self: AsRef<Path>,
     {
         File::create(self)
+    }
+
+    async fn create_tokio(&self) -> Result<TokioFile, IoError>
+    where
+        Self: AsRef<Path>,
+    {
+        TokioFile::create(self).await
     }
 
     fn decrement(self) -> Rect
@@ -153,11 +159,11 @@ pub trait Any {
         String::from_utf8(self.into())
     }
 
-    fn left<R>(self) -> Either<Self, R>
+    fn left_tokio<R>(self) -> TokioEither<Self, R>
     where
         Self: Sized,
     {
-        Either::Left(self)
+        TokioEither::Left(self)
     }
 
     fn len_graphemes(&self) -> usize
@@ -195,11 +201,11 @@ pub trait Any {
         Ok(self)
     }
 
-    fn open(&self) -> Result<File, IoError>
+    async fn open_tokio(&self) -> Result<TokioFile, IoError>
     where
         Self: AsRef<Path>,
     {
-        File::open(self)
+        TokioFile::open(self).await
     }
 
     fn paragraph<'a>(self) -> Paragraph<'a>
@@ -226,17 +232,6 @@ pub trait Any {
         begin..end
     }
 
-    fn read_into_string(&mut self) -> Result<String, IoError>
-    where
-        Self: Read,
-    {
-        let mut string = String::new();
-
-        self.read_to_string(&mut string)?;
-
-        string.ok()
-    }
-
     fn render_to(self, frame: &mut Frame, rect: Rect)
     where
         Self: Widget + Sized,
@@ -244,11 +239,11 @@ pub trait Any {
         frame.render_widget(self, rect);
     }
 
-    fn right<L>(self) -> Either<L, Self>
+    fn right_tokio<L>(self) -> TokioEither<L, Self>
     where
         Self: Sized,
     {
-        Either::Right(self)
+        TokioEither::Right(self)
     }
 
     fn saturating_add_in_place_with_max(&mut self, rhs: Self, max_value: Self)
@@ -272,7 +267,7 @@ pub trait Any {
         Some(self)
     }
 
-    fn spawn(self) -> JoinHandle<Self::Output>
+    fn spawn_task(self) -> JoinHandle<Self::Output>
     where
         Self: 'static + Future + Sized + Send,
         Self::Output: 'static + Send,
@@ -310,21 +305,14 @@ pub trait Any {
 
     fn unit(&self) {}
 
-    fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>
+    async fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>
     where
-        Self: Write,
+        Self: AsyncWriteExt + Unpin,
     {
-        self.write_all(data.as_ref())?;
-        self.flush()?;
+        self.write_all(data.as_ref()).await?;
+        self.flush().await?;
 
         ().ok()
-    }
-
-    fn write_all_and_flush_to<W: Write>(&self, mut writer: W) -> Result<(), IoError>
-    where
-        Self: AsRef<[u8]>,
-    {
-        writer.write_all_and_flush(self)
     }
 }
 
