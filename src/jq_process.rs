@@ -97,7 +97,7 @@ impl JqProcess {
         ().ok()
     }
 
-    #[tracing::instrument(skip_all, fields(command = ?self.command))]
+    #[tracing::instrument(skip_all, fields(command = ?self.command, input_len = self.input.len()))]
     pub async fn run(mut self) {
         self.run_helper().await.log_if_error();
     }

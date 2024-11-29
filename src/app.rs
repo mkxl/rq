@@ -14,7 +14,7 @@ use futures::StreamExt;
 use ratatui::{layout::Rect, style::Stylize, text::Line, Frame};
 use std::{io::Error as IoError, path::Path, time::Duration};
 use tokio::{
-    sync::mpsc::{error::TryRecvError, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{UnboundedReceiver, UnboundedSender},
     time::Interval,
 };
 use tui_widgets::prompts::{State, TextState};
@@ -84,19 +84,6 @@ impl App {
 
     fn interval() -> Interval {
         tokio::time::interval(Self::INTERVAL_DURATION)
-    }
-
-    fn update_jq_output(&mut self) {
-        let new_jq_output = match self.receiver.try_recv() {
-            Ok(new_jq_output) => new_jq_output,
-            Err(TryRecvError::Empty) => return,
-            Err(try_recv_error) => return try_recv_error.log_as_error(),
-        };
-
-        // NOTE: keep scroll offset if the output changes
-        if self.jq_output.instant() < new_jq_output.instant() {
-            self.jq_output = new_jq_output.with_scroll_view_offset(&self.jq_output);
-        }
     }
 
     fn render_scroll_view(frame: &mut Frame, rect: Rect, title: &str, scroll_view: &mut ScrollView) {
@@ -236,22 +223,29 @@ impl App {
         // NOTE: spawn jq process to render initial output
         self.spawn_jq_process()?;
 
+        // NOTE: bias towards reading the next line of input first
         loop {
             tokio::select! {
-                _instant = self.interval.tick() => {
-                    self.update_jq_output();
-                    terminal.inner().draw(|frame| self.render(frame))?;
+                biased;
+                line_res = self.input.next_line() => {
+                    self.input_scroll_view.push_line(&line_res?);
+                    self.spawn_jq_process()?;
                 }
+                jq_output_opt = self.receiver.recv() => {
+                    let Some(jq_output) = jq_output_opt else { anyhow::bail!("jq output stream unexpectedly closed") };
+
+                    // NOTE: keep scroll offset if the output changes
+                    if self.jq_output.instant() < jq_output.instant() {
+                        self.jq_output = jq_output.with_scroll_view_offset(&self.jq_output);
+                    }
+                }
+                _instant = self.interval.tick() => terminal.inner().draw(|frame| self.render(frame))?.unit(),
                 event_res_opt = self.event_stream.next() => {
                     let Some(event_res) = event_res_opt else { anyhow::bail!("event stream unexpectedly closed") };
 
                     if let Some(output_content) = self.handle_event(&event_res?).await? {
                         return output_content.ok();
                     }
-                }
-                line_res = self.input.next_line() => {
-                    self.input_scroll_view.push_line(&line_res?);
-                    self.spawn_jq_process()?;
                 }
             }
         }
