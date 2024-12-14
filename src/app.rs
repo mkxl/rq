@@ -1,5 +1,6 @@
 use crate::{
     any::Any,
+    channel::Channel,
     cli_args::JqCliArgs,
     input::Input,
     jq_process::{JqOutput, JqProcessBuilder},
@@ -13,10 +14,7 @@ use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers, Mous
 use futures::StreamExt;
 use ratatui::{layout::Rect, style::Stylize, text::Line, Frame};
 use std::{io::Error as IoError, path::Path, time::Duration};
-use tokio::{
-    sync::mpsc::{UnboundedReceiver, UnboundedSender},
-    time::Interval,
-};
+use tokio::time::Interval;
 use tui_widgets::prompts::{State, TextState};
 
 pub struct App {
@@ -25,9 +23,8 @@ pub struct App {
     input_scroll_view: ScrollView,
     interval: Interval,
     jq_output: JqOutput,
-    receiver: UnboundedReceiver<JqOutput>,
+    jq_outputs: Channel<JqOutput>,
     rect_set: RectSet,
-    sender: UnboundedSender<JqOutput>,
     text_state_set: TextStateSet,
 }
 
@@ -49,7 +46,7 @@ impl App {
         let input_scroll_view = ScrollView::new();
         let interval = Self::interval();
         let jq_output = JqOutput::empty();
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let jq_outputs = Channel::new();
         let rect_set = RectSet::empty();
         let text_state_set = TextStateSet::new(jq_cli_args, query);
         let app = Self {
@@ -58,9 +55,8 @@ impl App {
             input_scroll_view,
             interval,
             jq_output,
-            receiver,
+            jq_outputs,
             rect_set,
-            sender,
             text_state_set,
         };
 
@@ -154,7 +150,7 @@ impl App {
             flags: self.text_state_set.flags().value(),
             query: self.text_state_set.query().value(),
             input: self.input_scroll_view.content().as_bytes().to_vec(),
-            sender: self.sender.clone(),
+            jq_outputs_sender: self.jq_outputs.sender.clone(),
         }
         .build()?
         .run()
@@ -223,7 +219,6 @@ impl App {
         // NOTE: spawn jq process to render initial output
         self.spawn_jq_process()?;
 
-        // NOTE: bias towards reading the next line of input first
         loop {
             tokio::select! {
                 biased;
@@ -231,18 +226,14 @@ impl App {
                     self.input_scroll_view.push_line(&line_res?);
                     self.spawn_jq_process()?;
                 }
-                jq_output_opt = self.receiver.recv() => {
-                    let Some(jq_output) = jq_output_opt else { anyhow::bail!("jq output stream unexpectedly closed") };
-
+                _instant = self.interval.tick() => terminal.inner().draw(|frame| self.render(frame))?.unit(),
+                jq_output = self.jq_outputs.receiver.recv().unwrap_or_pending() => {
                     // NOTE: keep scroll offset if the output changes
                     if self.jq_output.instant() < jq_output.instant() {
                         self.jq_output = jq_output.with_scroll_view_offset(&self.jq_output);
                     }
                 }
-                _instant = self.interval.tick() => terminal.inner().draw(|frame| self.render(frame))?.unit(),
-                event_res_opt = self.event_stream.next() => {
-                    let Some(event_res) = event_res_opt else { anyhow::bail!("event stream unexpectedly closed") };
-
+                event_res = self.event_stream.next().unwrap_or_pending() => {
                     if let Some(output_content) = self.handle_event(&event_res?).await? {
                         return output_content.ok();
                     }

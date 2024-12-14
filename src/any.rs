@@ -305,6 +305,16 @@ pub trait Any {
 
     fn unit(&self) {}
 
+    async fn unwrap_or_pending<T>(self) -> T
+    where
+        Self: Future<Output = Option<T>> + Sized,
+    {
+        match self.await {
+            Some(value) => value,
+            None => std::future::pending().await,
+        }
+    }
+
     async fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>
     where
         Self: AsyncWriteExt + Unpin,

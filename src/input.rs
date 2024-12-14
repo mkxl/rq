@@ -1,47 +1,60 @@
-use crate::any::Any;
+use crate::{any::Any, channel::Channel};
 use derive_more::From;
-use std::{io::Error as IoError, path::Path};
+use std::{io::Error as IoError, marker::Unpin, path::Path};
 use tokio::{
-    fs::File,
-    io::{AsyncBufReadExt, BufReader, Lines, Stdin},
+    io::{AsyncBufRead, AsyncBufReadExt, Lines},
+    sync::mpsc::{error::SendError, UnboundedSender},
 };
-use tokio_util::either::Either;
+
+type LinesItem = Result<Option<String>, IoError>;
 
 #[derive(From)]
 pub struct Input {
-    lines: Option<Lines<BufReader<Either<File, Stdin>>>>,
+    channel: Channel<LinesItem>,
 }
 
 impl Input {
+    pub fn empty() -> Self {
+        Channel::new().into()
+    }
+
     pub async fn from_filepath(filepath: &Path) -> Result<Self, IoError> {
         filepath
             .open_tokio()
             .await?
-            .left_tokio()
             .buf_reader_tokio()
             .lines()
-            .some()
             .convert::<Self>()
             .ok()
     }
 
     pub fn from_stdin() -> Self {
-        tokio::io::stdin()
-            .right_tokio()
-            .buf_reader_tokio()
-            .lines()
-            .some()
-            .into()
+        tokio::io::stdin().buf_reader_tokio().lines().into()
     }
 
-    pub fn empty() -> Self {
-        None.into()
+    async fn read_lines<R: AsyncBufRead + Unpin>(
+        sender: UnboundedSender<LinesItem>,
+        mut lines: Lines<R>,
+    ) -> Result<(), SendError<LinesItem>> {
+        loop {
+            sender.send(lines.next_line().await)?;
+        }
     }
 
     pub async fn next_line(&mut self) -> Result<String, IoError> {
-        let Some(lines) = &mut self.lines else { std::future::pending().await };
-        let Some(line) = lines.next_line().await? else { std::future::pending().await };
+        match self.channel.receiver.recv().unwrap_or_pending().await? {
+            Some(line) => line.ok(),
+            None => std::future::pending().await,
+        }
+    }
+}
 
-        line.ok()
+impl<R: 'static + AsyncBufRead + Send + Unpin> From<Lines<R>> for Input {
+    fn from(lines: Lines<R>) -> Self {
+        let channel = Channel::new();
+
+        Self::read_lines(channel.sender.clone(), lines).spawn_task();
+
+        channel.into()
     }
 }

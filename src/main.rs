@@ -1,5 +1,6 @@
 mod any;
 mod app;
+mod channel;
 mod cli_args;
 mod input;
 mod jq_process;

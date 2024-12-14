@@ -5,6 +5,7 @@ use std::{
     fmt::{Display, Formatter, Result as FmtResult},
     path::PathBuf,
 };
+use tracing::Level;
 use tracing_subscriber::fmt::format::FmtSpan;
 
 #[derive(Args)]
@@ -57,7 +58,10 @@ impl Display for JqCliArgs {
 #[derive(Parser)]
 pub struct CliArgs {
     #[arg(long = "logs")]
-    logs_filepath: Option<PathBuf>,
+    log_filepath: Option<PathBuf>,
+
+    #[arg(long, default_value_t = Level::INFO)]
+    log_level: Level,
 
     #[arg(long = "out")]
     output_filepath: Option<PathBuf>,
@@ -75,13 +79,14 @@ impl CliArgs {
     const FMT_SPAN: FmtSpan = FmtSpan::CLOSE;
 
     fn init_tracing(&self) -> Result<(), Error> {
-        let Some(logs_filepath) = &self.logs_filepath else { return ().ok() };
-        let logs_file = logs_filepath.create()?;
+        let Some(log_filepath) = &self.log_filepath else { return ().ok() };
+        let log_file = log_filepath.create()?;
 
         // TODO: consider using tracing-appender for writing to a file
         tracing_subscriber::fmt()
+            .with_max_level(self.log_level)
             .with_span_events(Self::FMT_SPAN)
-            .with_writer(logs_file)
+            .with_writer(log_file)
             .json()
             .init()
             .ok()

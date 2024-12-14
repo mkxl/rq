@@ -12,10 +12,10 @@ impl TextStateSet {
     const INITIAL_FOCUSED_QUERY: FocusState = FocusState::Focused;
 
     pub fn new(jq_cli_args: &JqCliArgs, initial_query: Option<String>) -> Self {
-        Self {
-            flags: Self::text_state(Self::INITIAL_FOCUSED_FLAGS, jq_cli_args.to_string()),
-            query: Self::text_state(Self::INITIAL_FOCUSED_QUERY, initial_query.unwrap_or_default()),
-        }
+        let flags = Self::text_state(Self::INITIAL_FOCUSED_FLAGS, jq_cli_args.to_string());
+        let query = Self::text_state(Self::INITIAL_FOCUSED_QUERY, initial_query.unwrap_or_default());
+
+        Self { flags, query }
     }
 
     fn text_state(focus_state: FocusState, value: String) -> TextState<'static> {

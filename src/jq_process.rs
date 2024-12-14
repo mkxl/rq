@@ -38,7 +38,7 @@ pub struct JqProcessBuilder<'a> {
     pub flags: &'a str,
     pub query: &'a str,
     pub input: Vec<u8>,
-    pub sender: UnboundedSender<JqOutput>,
+    pub jq_outputs_sender: UnboundedSender<JqOutput>,
 }
 
 impl<'a> JqProcessBuilder<'a> {
@@ -52,7 +52,7 @@ impl<'a> JqProcessBuilder<'a> {
             instant,
             command,
             input: self.input,
-            sender: self.sender,
+            jq_outputs_sender: self.jq_outputs_sender,
         };
 
         jq_process
@@ -71,7 +71,7 @@ pub struct JqProcess {
     instant: Instant,
     command: Command,
     input: Vec<u8>,
-    sender: UnboundedSender<JqOutput>,
+    jq_outputs_sender: UnboundedSender<JqOutput>,
 }
 
 impl JqProcess {
@@ -92,7 +92,7 @@ impl JqProcess {
 
         let jq_output = JqOutput::new(self.instant, output.stdout.as_str()?);
 
-        self.sender.send(jq_output)?;
+        self.jq_outputs_sender.send(jq_output)?;
 
         ().ok()
     }
