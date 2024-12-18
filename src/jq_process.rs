@@ -37,29 +37,37 @@ impl JqOutput {
 pub struct JqProcessBuilder<'a> {
     pub flags: &'a str,
     pub query: &'a str,
-    pub input: Vec<u8>,
+    pub input: &'a [u8],
     pub jq_outputs_sender: UnboundedSender<JqOutput>,
 }
 
 impl<'a> JqProcessBuilder<'a> {
     const JQ_EXECUTABLE_NAME: &'static str = "jq";
+    const DEFAULT_QUERY: &'static str = ".";
 
     pub fn build(self) -> Result<JqProcess, Error> {
         let instant = Instant::now();
         let command = Command::new(Self::JQ_EXECUTABLE_NAME);
         let Some(args) = shlex::split(self.flags) else { anyhow::bail!("unable to split flags for the shell") };
+        let query = if self.query.is_empty() {
+            Self::DEFAULT_QUERY
+        } else {
+            self.query
+        };
+        let (pipe_reader, mut pipe_writer) = std::pipe::pipe()?;
         let mut jq_process = JqProcess {
             instant,
             command,
-            input: self.input,
             jq_outputs_sender: self.jq_outputs_sender,
         };
+
+        pipe_writer.write_all_and_flush(self.input)?;
 
         jq_process
             .command
             .args(args)
-            .arg(self.query)
-            .stdin(Stdio::piped())
+            .arg(query)
+            .stdin(pipe_reader)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
@@ -70,7 +78,6 @@ impl<'a> JqProcessBuilder<'a> {
 pub struct JqProcess {
     instant: Instant,
     command: Command,
-    input: Vec<u8>,
     jq_outputs_sender: UnboundedSender<JqOutput>,
 }
 
@@ -81,23 +88,28 @@ impl JqProcess {
     //   - some join!(command, other) type thing where other can be set or told to cancel on updates/new calls to
     //     this function
     async fn run_helper(&mut self) -> Result<(), Error> {
-        let mut child = self.command.spawn()?;
-        let Some(stdin) = &mut child.stdin else { anyhow::bail!("unable to write to stdin") };
+        tracing::warn!(command_begin = ?self.command);
 
-        stdin.write_all_and_flush(&self.input).await?;
+        tracing::warn!("waiting for output");
 
-        let output = child.wait_with_output().await?;
+        let output = self.command.output().await?;
+
+        tracing::warn!(output_num_bytes_read = output.stdout.len());
 
         anyhow::ensure!(output.status.success(), output.stderr.into_string()?);
+
+        tracing::warn!("making jq_output");
 
         let jq_output = JqOutput::new(self.instant, output.stdout.as_str()?);
 
         self.jq_outputs_sender.send(jq_output)?;
 
+        tracing::warn!("sent jq_output");
+
         ().ok()
     }
 
-    #[tracing::instrument(skip_all, fields(command = ?self.command, input_len = self.input.len()))]
+    #[tracing::instrument(skip_all, fields(command = ?self.command))]
     pub async fn run(mut self) {
         self.run_helper().await.log_if_error();
     }

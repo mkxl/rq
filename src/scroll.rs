@@ -209,6 +209,15 @@ impl ScrollView {
         self.content.push_str(Self::CRLF);
     }
 
+    pub fn extend<T: IntoIterator>(&mut self, lines: T)
+    where
+        T::Item: AsRef<str>,
+    {
+        for line in lines {
+            self.push_line(line.as_ref());
+        }
+    }
+
     pub fn render(&mut self, frame: &mut Frame, rect: Rect) {
         self.page_size = rect.as_size();
 

@@ -1,3 +1,5 @@
+#![feature(anonymous_pipe)]
+
 mod any;
 mod app;
 mod channel;

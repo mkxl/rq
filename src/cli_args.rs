@@ -78,9 +78,9 @@ pub struct CliArgs {
 impl CliArgs {
     const FMT_SPAN: FmtSpan = FmtSpan::CLOSE;
 
-    fn init_tracing(&self) -> Result<(), Error> {
+    async fn init_tracing(&self) -> Result<(), Error> {
         let Some(log_filepath) = &self.log_filepath else { return ().ok() };
-        let log_file = log_filepath.create()?;
+        let log_file = log_filepath.create().await?.into_std().await;
 
         // TODO: consider using tracing-appender for writing to a file
         tracing_subscriber::fmt()
@@ -93,19 +93,20 @@ impl CliArgs {
     }
 
     pub async fn run(self) -> Result<(), Error> {
-        self.init_tracing()?;
+        self.init_tracing().await?;
 
         let input_filepath = self.input_filepath.as_deref();
         let output_value = App::new(input_filepath, &self.jq_cli_args, self.query)
             .await?
             .run()
             .await?;
-        let mut writer = if let Some(output_filepath) = &self.output_filepath {
-            output_filepath.create_tokio().await?.left_tokio()
-        } else {
-            tokio::io::stdout().right_tokio()
-        };
 
-        writer.write_all_and_flush(output_value).await?.ok()
+        if let Some(output_filepath) = &self.output_filepath {
+            output_filepath.create().await?.into_std().await.left()
+        } else {
+            std::io::stdout().right()
+        }
+        .write_all_and_flush(output_value)?
+        .ok()
     }
 }

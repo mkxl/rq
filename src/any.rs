@@ -1,3 +1,4 @@
+use either::Either;
 use num::{
     traits::{SaturatingAdd, SaturatingSub},
     Bounded, NumCast, ToPrimitive,
@@ -11,22 +12,19 @@ use ratatui::{
 use std::{
     borrow::BorrowMut,
     fmt::Display,
-    fs::File,
     future::Future,
     hash::{DefaultHasher, Hash, Hasher},
-    io::Error as IoError,
-    marker::Unpin,
+    io::{Error as IoError, Write},
     ops::{Bound, Range, RangeBounds},
     path::Path,
     str::Utf8Error,
     string::FromUtf8Error,
 };
 use tokio::{
-    fs::File as TokioFile,
-    io::{AsyncRead, AsyncWriteExt, BufReader as TokioBufReader},
+    fs::File,
+    io::{AsyncRead, BufReader},
     task::JoinHandle,
 };
-use tokio_util::either::Either as TokioEither;
 use tui_widgets::prompts::{State, TextState};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -54,11 +52,11 @@ pub trait Any {
         self.into().block(title.block())
     }
 
-    fn buf_reader_tokio(self) -> TokioBufReader<Self>
+    fn buf_reader(self) -> BufReader<Self>
     where
         Self: AsyncRead + Sized,
     {
-        TokioBufReader::new(self)
+        BufReader::new(self)
     }
 
     fn cast<T: Bounded + NumCast>(self) -> T
@@ -78,18 +76,11 @@ pub trait Any {
         self.into()
     }
 
-    fn create(&self) -> Result<File, IoError>
+    async fn create(&self) -> Result<File, IoError>
     where
         Self: AsRef<Path>,
     {
-        File::create(self)
-    }
-
-    async fn create_tokio(&self) -> Result<TokioFile, IoError>
-    where
-        Self: AsRef<Path>,
-    {
-        TokioFile::create(self).await
+        File::create(self).await
     }
 
     fn decrement(self) -> Rect
@@ -97,6 +88,13 @@ pub trait Any {
         Self: Into<Rect>,
     {
         self.into().inner(Margin::new(1, 1))
+    }
+
+    fn err<T, E>(self) -> Result<T, E>
+    where
+        Self: Into<E>,
+    {
+        Err(self.into())
     }
 
     fn first_and_last(&mut self) -> Option<(Self::Item, Self::Item)>
@@ -159,11 +157,11 @@ pub trait Any {
         String::from_utf8(self.into())
     }
 
-    fn left_tokio<R>(self) -> TokioEither<Self, R>
+    fn left<R>(self) -> Either<Self, R>
     where
         Self: Sized,
     {
-        TokioEither::Left(self)
+        Either::Left(self)
     }
 
     fn len_graphemes(&self) -> usize
@@ -173,7 +171,7 @@ pub trait Any {
         self.as_ref().graphemes(Self::IS_EXTENDED).count()
     }
 
-    fn log_as_error(&self)
+    fn log_error(&self)
     where
         Self: Display,
     {
@@ -186,26 +184,33 @@ pub trait Any {
     {
         match self.into() {
             Ok(ok) => ok.some(),
-            Err(error) => error.log_as_error().none(),
+            Err(error) => error.log_error().none(),
         }
+    }
+
+    fn mem_take(&mut self) -> Self
+    where
+        Self: Default + Sized,
+    {
+        std::mem::take(self)
     }
 
     fn none<T>(&self) -> Option<T> {
         None
     }
 
-    fn ok<E>(self) -> Result<Self, E>
+    fn ok<T, E>(self) -> Result<T, E>
     where
-        Self: Sized,
+        Self: Into<T> + Sized,
     {
-        Ok(self)
+        Ok(self.into())
     }
 
-    async fn open_tokio(&self) -> Result<TokioFile, IoError>
+    async fn open(&self) -> Result<File, IoError>
     where
         Self: AsRef<Path>,
     {
-        TokioFile::open(self).await
+        File::open(self).await
     }
 
     fn paragraph<'a>(self) -> Paragraph<'a>
@@ -239,11 +244,11 @@ pub trait Any {
         frame.render_widget(self, rect);
     }
 
-    fn right_tokio<L>(self) -> TokioEither<L, Self>
+    fn right<L>(self) -> Either<L, Self>
     where
         Self: Sized,
     {
-        TokioEither::Right(self)
+        Either::Right(self)
     }
 
     fn saturating_add_in_place_with_max(&mut self, rhs: Self, max_value: Self)
@@ -315,12 +320,12 @@ pub trait Any {
         }
     }
 
-    async fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>
+    fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>
     where
-        Self: AsyncWriteExt + Unpin,
+        Self: Write,
     {
-        self.write_all(data.as_ref()).await?;
-        self.flush().await?;
+        self.write_all(data.as_ref())?;
+        self.flush()?;
 
         ().ok()
     }

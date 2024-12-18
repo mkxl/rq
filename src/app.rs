@@ -42,7 +42,7 @@ impl App {
         query: Option<String>,
     ) -> Result<Self, Error> {
         let event_stream = EventStream::new();
-        let input = Self::input(input_filepath, jq_cli_args).await?;
+        let input = Self::input(input_filepath).await?;
         let input_scroll_view = ScrollView::new();
         let interval = Self::interval();
         let jq_output = JqOutput::empty();
@@ -63,15 +63,13 @@ impl App {
         app.ok()
     }
 
-    async fn input(input_filepath: Option<&Path>, jq_cli_args: &JqCliArgs) -> Result<Input, IoError> {
+    async fn input(input_filepath: Option<&Path>) -> Result<Input, IoError> {
         // NOTE:
         // - if both an input filepath and `--null-input` are supplied, let `jq` determine what the output should be
         //   by supplying both stdin and the --null-input flag
         // - otherwise, if no input filepath is supplied, but `--null-input` is, definitely do not read from stdin
         if let Some(input_filepath) = input_filepath {
             Input::from_filepath(input_filepath).await?
-        } else if jq_cli_args.null_input {
-            Input::empty()
         } else {
             Input::from_stdin()
         }
@@ -145,11 +143,10 @@ impl App {
     }
 
     fn spawn_jq_process(&self) -> Result<(), Error> {
-        // TODO: figure out how to supply input without cloning data
         JqProcessBuilder {
             flags: self.text_state_set.flags().value(),
             query: self.text_state_set.query().value(),
-            input: self.input_scroll_view.content().as_bytes().to_vec(),
+            input: self.input_scroll_view.content().as_bytes(),
             jq_outputs_sender: self.jq_outputs.sender.clone(),
         }
         .build()?
@@ -160,25 +157,30 @@ impl App {
     }
 
     async fn handle_key_event(&mut self, key_event: &KeyEvent) -> Result<Option<String>, Error> {
-        if self.text_state_set.handle_key_event(*key_event) {
-            self.spawn_jq_process()?;
-        }
-
-        if !std::matches!(
-            key_event,
+        match key_event {
             KeyEvent {
-                code: KeyCode::Enter,
+                code: KeyCode::Char('c'),
+                modifiers: KeyModifiers::CONTROL,
                 ..
+            } => anyhow::bail!(Self::QUIT_MESSAGE),
+            KeyEvent { code: KeyCode::Tab, .. } => self.text_state_set.toggle_focus().none().ok(),
+            KeyEvent {
+                code: KeyCode::Enter, ..
+            } => {
+                // NOTE: allow any recently spawned jq process to run and update self.jq_output before ending the
+                // program with this output value
+                tokio::time::sleep(Self::INTERVAL_DURATION).await;
+
+                self.jq_output.scroll_view_mut().take_content().some().ok()
             }
-        ) {
-            return None.ok();
+            _key_event => {
+                if self.text_state_set.handle_key_event(*key_event) {
+                    self.spawn_jq_process()?;
+                }
+
+                None.ok()
+            }
         }
-
-        // NOTE: allow any recently spawned jq process to run and update self.jq_output before ending the program with
-        // this output value
-        tokio::time::sleep(Self::INTERVAL_DURATION).await;
-
-        self.jq_output.scroll_view_mut().take_content().some().ok()
     }
 
     fn handle_mouse_event(&mut self, mouse_event: MouseEvent) {
@@ -201,12 +203,6 @@ impl App {
     #[tracing::instrument(skip(self), fields(?event))]
     async fn handle_event(&mut self, event: &Event) -> Result<Option<String>, Error> {
         match event {
-            Event::Key(KeyEvent {
-                code: KeyCode::Char('c'),
-                modifiers: KeyModifiers::CONTROL,
-                ..
-            }) => anyhow::bail!(Self::QUIT_MESSAGE),
-            Event::Key(KeyEvent { code: KeyCode::Tab, .. }) => self.text_state_set.toggle_focus().none().ok(),
             Event::Key(key_event) => self.handle_key_event(key_event).await,
             Event::Mouse(mouse_event) => self.handle_mouse_event(*mouse_event).none().ok(),
             ignored_event => tracing::debug!(?ignored_event).none().ok(),
@@ -221,12 +217,11 @@ impl App {
 
         loop {
             tokio::select! {
-                biased;
-                line_res = self.input.next_line() => {
-                    self.input_scroll_view.push_line(&line_res?);
+                _instant = self.interval.tick() => terminal.inner().draw(|frame| self.render(frame))?.unit(),
+                lines_res = self.input.next_lines() => {
+                    self.input_scroll_view.extend(&lines_res?);
                     self.spawn_jq_process()?;
                 }
-                _instant = self.interval.tick() => terminal.inner().draw(|frame| self.render(frame))?.unit(),
                 jq_output = self.jq_outputs.receiver.recv().unwrap_or_pending() => {
                     // NOTE: keep scroll offset if the output changes
                     if self.jq_output.instant() < jq_output.instant() {
