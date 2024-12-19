@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.91"
 clap = { version = "4.5.20", features = ["derive"] }
+console-subscriber = "0.4.1"
 crossterm = { version = "0.28.1", features = ["event-stream", "libc", "use-dev-tty"] }
 derive_more = { version = "1.0.0", features = ["from"] }
 either = "1.13.0"

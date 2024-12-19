@@ -3,10 +3,11 @@ use anyhow::Error;
 use clap::{Args, Parser};
 use std::{
     fmt::{Display, Formatter, Result as FmtResult},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
-use tracing::Level;
-use tracing_subscriber::fmt::format::FmtSpan;
+use tracing_subscriber::{
+    filter::LevelFilter, fmt::format::FmtSpan, layer::SubscriberExt, util::SubscriberInitExt, Layer,
+};
 
 #[derive(Args)]
 #[allow(clippy::struct_excessive_bools)]
@@ -60,8 +61,8 @@ pub struct CliArgs {
     #[arg(long = "logs")]
     log_filepath: Option<PathBuf>,
 
-    #[arg(long, default_value_t = Level::INFO)]
-    log_level: Level,
+    #[arg(long = "log-level", default_value_t = LevelFilter::INFO)]
+    log_level_filter: LevelFilter,
 
     #[arg(long = "out")]
     output_filepath: Option<PathBuf>,
@@ -77,17 +78,31 @@ pub struct CliArgs {
 
 impl CliArgs {
     const FMT_SPAN: FmtSpan = FmtSpan::CLOSE;
+    const DEFAULT_LOG_FILEPATH_STR: &'static str = "/dev/null";
+
+    fn default_log_filepath() -> &'static Path {
+        Path::new(Self::DEFAULT_LOG_FILEPATH_STR)
+    }
 
     async fn init_tracing(&self) -> Result<(), Error> {
-        let Some(log_filepath) = &self.log_filepath else { return ().ok() };
+        // TODO:
+        // - consider using tracing-appender for writing to a file
+        // - let log_filepath = self.log_filepath.as_deref().unwrap_or_else(Self::default_log_filepath);
+        let log_filepath = if let Some(log_filepath) = &self.log_filepath {
+            log_filepath.as_path()
+        } else {
+            Self::default_log_filepath()
+        };
         let log_file = log_filepath.create().await?.into_std().await;
-
-        // TODO: consider using tracing-appender for writing to a file
-        tracing_subscriber::fmt()
-            .with_max_level(self.log_level)
+        let log_layer = tracing_subscriber::fmt::layer()
             .with_span_events(Self::FMT_SPAN)
             .with_writer(log_file)
             .json()
+            .with_filter(self.log_level_filter);
+
+        tracing_subscriber::registry()
+            .with(console_subscriber::spawn())
+            .with(log_layer)
             .init()
             .ok()
     }
