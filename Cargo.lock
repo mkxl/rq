@@ -1409,7 +1409,6 @@ dependencies = [
  "console-subscriber",
  "crossterm",
  "derive_more",
- "either",
  "futures",
  "num",
  "ratatui",

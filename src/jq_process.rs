@@ -1,7 +1,15 @@
 use crate::{any::Any, scroll::ScrollView};
 use anyhow::Error;
-use std::{process::Stdio, time::Instant};
-use tokio::{process::Command, sync::mpsc::UnboundedSender};
+use std::{
+    io::Error as IoError,
+    process::Stdio,
+    time::{Duration, Instant},
+};
+use tokio::{
+    io::AsyncReadExt,
+    process::{ChildStdin, ChildStdout, Command},
+    sync::mpsc::UnboundedSender,
+};
 
 pub struct JqOutput {
     instant: Instant,
@@ -45,72 +53,94 @@ impl<'a> JqProcessBuilder<'a> {
     const JQ_EXECUTABLE_NAME: &'static str = "jq";
     const DEFAULT_QUERY: &'static str = ".";
 
+    // TODO-d9feca: figure out why ok_or_error requires turbofish
     pub fn build(self) -> Result<JqProcess, Error> {
         let instant = Instant::now();
-        let command = Command::new(Self::JQ_EXECUTABLE_NAME);
-        let Some(args) = shlex::split(self.flags) else { anyhow::bail!("unable to split flags for the shell") };
+        let args = shlex::split(self.flags).ok_or_error::<Vec<String>>("unable to split flags for the shell")?;
         let query = if self.query.is_empty() {
             Self::DEFAULT_QUERY
         } else {
             self.query
         };
-        let (pipe_reader, mut pipe_writer) = std::pipe::pipe()?;
-        let mut jq_process = JqProcess {
-            instant,
-            command,
-            jq_outputs_sender: self.jq_outputs_sender,
-        };
+        let mut command = Command::new(Self::JQ_EXECUTABLE_NAME);
+        let input = self.input.to_vec();
+        let jq_outputs_sender = self.jq_outputs_sender;
 
-        pipe_writer.write_all_and_flush(self.input)?;
-
-        jq_process
-            .command
+        command
             .args(args)
             .arg(query)
-            .stdin(pipe_reader)
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        jq_process.ok()
+        JqProcess {
+            instant,
+            command,
+            input,
+            jq_outputs_sender,
+        }
+        .ok()
     }
 }
 
 pub struct JqProcess {
     instant: Instant,
     command: Command,
+    input: Vec<u8>,
     jq_outputs_sender: UnboundedSender<JqOutput>,
 }
 
 impl JqProcess {
-    // TODO:
-    // - determine if this is useful: [https://docs.rs/tokio/latest/tokio/process/index.html#droppingcancellation]
-    // - figure out how to cancel previously started processes
-    //   - some join!(command, other) type thing where other can be set or told to cancel on updates/new calls to
-    //     this function
-    async fn run_helper(&mut self) -> Result<(), Error> {
-        tracing::warn!(command_begin = ?self.command);
+    const POST_WRITE_SLEEP_DURATION: Duration = Duration::from_millis(5);
 
-        tracing::warn!("waiting for output");
+    // NOTE: loop stdout.read_buf() rather than a single call to stdout.read_to_end() to not end early if 0 bytes are
+    // read
+    async fn read(mut stdout: ChildStdout, content: &mut Vec<u8>) -> Result<(), IoError> {
+        loop {
+            stdout.read_buf(content).await?;
+        }
+    }
 
-        let output = self.command.output().await?;
-
-        tracing::warn!(output_num_bytes_read = output.stdout.len());
-
-        anyhow::ensure!(output.status.success(), output.stderr.into_string()?);
-
-        tracing::warn!("making jq_output");
-
-        let jq_output = JqOutput::new(self.instant, output.stdout.as_str()?);
-
-        self.jq_outputs_sender.send(jq_output)?;
-
-        tracing::warn!("sent jq_output");
+    // NOTE:
+    // - both std::mem::drop() and tokio::time::sleep() seem to be necessary to get the output to render
+    // - Self::POST_WRITE_SLEEP_DURATION chosen based off trial and error
+    async fn write(mut stdin: ChildStdin, input: &[u8]) -> Result<(), IoError> {
+        stdin.write_all_and_flush(input).await?;
+        std::mem::drop(stdin);
+        tokio::time::sleep(Self::POST_WRITE_SLEEP_DURATION).await;
 
         ().ok()
     }
 
-    #[tracing::instrument(skip_all, fields(command = ?self.command))]
-    pub async fn run(mut self) {
+    // TODO:
+    // - TODO-d9feca
+    // - determine if this is useful: [https://docs.rs/tokio/latest/tokio/process/index.html#droppingcancellation]
+    // - figure out how to cancel previously started processes
+    //   - some join!(command, other) type thing where other can be set or told to cancel on updates/new calls to
+    //     this function
+    async fn run_helper(mut self) -> Result<(), Error> {
+        let mut child = self.command.spawn()?;
+        let stdin = child.stdin.take().ok_or_error::<ChildStdin>("unable to get stdin")?;
+        let stdout = child.stdout.take().ok_or_error::<ChildStdout>("unable to get stdout")?;
+        let mut content = Vec::new();
+        let read = Self::read(stdout, &mut content);
+        let write = Self::write(stdin, &self.input);
+
+        Self::select(read, write).await?;
+
+        let output = child.wait_with_output().await?;
+
+        anyhow::ensure!(output.status.success(), output.stderr.into_string()?);
+
+        let jq_output = JqOutput::new(self.instant, &content.into_string()?);
+
+        self.jq_outputs_sender.send(jq_output)?;
+
+        ().ok()
+    }
+
+    #[tracing::instrument(skip_all)]
+    pub async fn run(self) {
         self.run_helper().await.log_if_error();
     }
 }

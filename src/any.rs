@@ -1,4 +1,4 @@
-use either::Either;
+use anyhow::Error;
 use num::{
     traits::{SaturatingAdd, SaturatingSub},
     Bounded, NumCast, ToPrimitive,
@@ -14,29 +14,22 @@ use std::{
     fmt::Display,
     future::Future,
     hash::{DefaultHasher, Hash, Hasher},
-    io::{Error as IoError, Write},
+    io::Error as IoError,
     ops::{Bound, Range, RangeBounds},
     path::Path,
-    str::Utf8Error,
     string::FromUtf8Error,
 };
 use tokio::{
     fs::File,
-    io::{AsyncRead, BufReader},
+    io::{AsyncRead, AsyncWriteExt, BufReader},
     task::JoinHandle,
 };
+use tokio_util::either::Either;
 use tui_widgets::prompts::{State, TextState};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub trait Any {
     const IS_EXTENDED: bool = true;
-
-    fn as_str(&self) -> Result<&str, Utf8Error>
-    where
-        Self: AsRef<[u8]>,
-    {
-        std::str::from_utf8(self.as_ref())
-    }
 
     fn block<'a>(self) -> Block<'a>
     where
@@ -206,6 +199,16 @@ pub trait Any {
         Ok(self.into())
     }
 
+    fn ok_or_error<T>(self, msg: &'static str) -> Result<T, Error>
+    where
+        Self: Into<Option<T>>,
+    {
+        match self.into() {
+            Some(value) => value.ok(),
+            None => anyhow::bail!(msg),
+        }
+    }
+
     async fn open(&self) -> Result<File, IoError>
     where
         Self: AsRef<Path>,
@@ -265,6 +268,13 @@ pub trait Any {
         *self = self.saturating_sub(&rhs).min(max_value);
     }
 
+    async fn select<T, F1: Future<Output = T>, F2: Future<Output = T>>(fut_1: F1, fut_2: F2) -> T {
+        tokio::select! {
+            output = fut_1 => output,
+            output = fut_2 => output,
+        }
+    }
+
     fn some(self) -> Option<Self>
     where
         Self: Sized,
@@ -320,12 +330,12 @@ pub trait Any {
         }
     }
 
-    fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>
+    async fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>
     where
-        Self: Write,
+        Self: AsyncWriteExt + Unpin,
     {
-        self.write_all(data.as_ref())?;
-        self.flush()?;
+        self.write_all(data.as_ref()).await?;
+        self.flush().await?;
 
         ().ok()
     }

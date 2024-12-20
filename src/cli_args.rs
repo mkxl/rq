@@ -117,11 +117,12 @@ impl CliArgs {
             .await?;
 
         if let Some(output_filepath) = &self.output_filepath {
-            output_filepath.create().await?.into_std().await.left()
+            output_filepath.create().await?.left()
         } else {
-            std::io::stdout().right()
+            tokio::io::stdout().right()
         }
-        .write_all_and_flush(output_value)?
+        .write_all_and_flush(output_value)
+        .await?
         .ok()
     }
 }

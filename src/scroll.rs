@@ -65,7 +65,7 @@ pub struct ScrollView {
 }
 
 impl ScrollView {
-    const CRLF: &'static str = "\r\n";
+    const LINE_SEPARATOR: &'static str = "\n";
     const LARGE_SCROLL_COUNT: u16 = 5;
     const NORMAL_SCROLL_COUNT: u16 = 1;
 
@@ -206,7 +206,7 @@ impl ScrollView {
 
         self.content.len().range(line.len()).push_to(&mut self.line_ranges);
         self.content.push_str(line);
-        self.content.push_str(Self::CRLF);
+        self.content.push_str(Self::LINE_SEPARATOR);
     }
 
     pub fn extend<T: IntoIterator>(&mut self, lines: T)
