@@ -10,10 +10,8 @@ use ratatui::{
     Frame,
 };
 use std::{
-    borrow::BorrowMut,
     fmt::Display,
     future::Future,
-    hash::{DefaultHasher, Hash, Hasher},
     io::Error as IoError,
     ops::{Bound, Range, RangeBounds},
     path::Path,
@@ -25,7 +23,6 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::either::Either;
-use tui_widgets::prompts::{State, TextState};
 use unicode_segmentation::UnicodeSegmentation;
 
 pub trait Any {
@@ -36,13 +33,6 @@ pub trait Any {
         Self: Into<Title<'a>> + Sized,
     {
         Block::bordered().title(self)
-    }
-
-    fn bordered_block<'a, T: Into<Title<'a>>>(self, title: T) -> Paragraph<'a>
-    where
-        Self: Into<Paragraph<'a>>,
-    {
-        self.into().block(title.block())
     }
 
     fn buf_reader(self) -> BufReader<Self>
@@ -102,17 +92,6 @@ pub trait Any {
             None => (first, first),
         }
         .some()
-    }
-
-    fn hash_code(&self) -> u64
-    where
-        Self: Hash,
-    {
-        let mut hasher = DefaultHasher::new();
-
-        self.hash(&mut hasher);
-
-        hasher.finish()
     }
 
     fn indices(&self, text: &str) -> (usize, usize)
@@ -305,19 +284,6 @@ pub trait Any {
         }
     }
 
-    fn toggle_focus<'a>(&mut self)
-    where
-        Self: BorrowMut<TextState<'a>>,
-    {
-        let text_state = self.borrow_mut();
-
-        if text_state.is_focused() {
-            text_state.blur();
-        } else {
-            text_state.focus();
-        }
-    }
-
     fn unit(&self) {}
 
     async fn unwrap_or_pending<T>(self) -> T
@@ -328,6 +294,10 @@ pub trait Any {
             Some(value) => value,
             None => std::future::pending().await,
         }
+    }
+
+    fn with<T>(&self, value: T) -> T {
+        value
     }
 
     async fn write_all_and_flush<T: AsRef<[u8]>>(&mut self, data: T) -> Result<(), IoError>

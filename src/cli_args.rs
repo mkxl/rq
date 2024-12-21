@@ -29,8 +29,8 @@ pub struct JqCliArgs {
 }
 
 impl Display for JqCliArgs {
-    // NOTE: including a trailing space is okay bc when user goes to edit the flags they're gonna want to add a space
-    // after anyways
+    // NOTE: including a trailing space is okay bc when user goes to edit the cli-flags they're gonna want to add a
+    // space after anyways
     fn fmt(&self, formatter: &mut Formatter) -> FmtResult {
         if self.compact_output {
             formatter.write_str("--compact-output ")?;
@@ -71,7 +71,7 @@ pub struct CliArgs {
     jq_cli_args: JqCliArgs,
 
     #[arg(long)]
-    query: Option<String>,
+    filter: Option<String>,
 
     input_filepath: Option<PathBuf>,
 }
@@ -111,7 +111,7 @@ impl CliArgs {
         self.init_tracing().await?;
 
         let input_filepath = self.input_filepath.as_deref();
-        let output_value = App::new(input_filepath, &self.jq_cli_args, self.query)
+        let output_value = App::new(input_filepath, &self.jq_cli_args, self.filter)
             .await?
             .run()
             .await?;

@@ -18,6 +18,7 @@ tokio = { version = "1.41.0", features = ["fs", "io-std", "io-util", "macros", "
 tokio-util = "0.7.12"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["json"] }
+tui-textarea = "0.7.0"
 tui-widgets = "0.4.0"
 unicode-segmentation = "1.12.0"
 

@@ -4,10 +4,10 @@ mod channel;
 mod cli_args;
 mod input;
 mod jq_process;
+mod line_editor_set;
 mod rect_set;
 mod scroll;
 mod terminal;
-mod text_state_set;
 
 use crate::cli_args::CliArgs;
 use anyhow::Error;

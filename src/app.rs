@@ -4,18 +4,17 @@ use crate::{
     cli_args::JqCliArgs,
     input::Input,
     jq_process::{JqOutput, JqProcessBuilder},
+    line_editor_set::LineEditorSet,
     rect_set::RectSet,
     scroll::ScrollView,
     terminal::Terminal,
-    text_state_set::TextStateSet,
 };
 use anyhow::Error;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use futures::StreamExt;
-use ratatui::{layout::Rect, style::Stylize, text::Line, Frame};
+use ratatui::{layout::Rect, Frame};
 use std::{io::Error as IoError, path::Path, time::Duration};
 use tokio::time::Interval;
-use tui_widgets::prompts::{State, TextState};
 
 pub struct App {
     event_stream: EventStream,
@@ -24,22 +23,20 @@ pub struct App {
     interval: Interval,
     jq_output: JqOutput,
     jq_outputs: Channel<JqOutput>,
+    line_editor_set: LineEditorSet,
     rect_set: RectSet,
-    text_state_set: TextStateSet,
 }
 
 impl App {
-    const FLAGS_BLOCK_TITLE: &'static str = "FLAGS";
     const INPUT_BLOCK_TITLE: &'static str = "INPUT";
     const INTERVAL_DURATION: Duration = Duration::from_millis(50);
     const OUTPUT_BLOCK_TITLE: &'static str = "OUTPUT";
-    const QUERY_BLOCK_TITLE: &'static str = "QUERY";
     const QUIT_MESSAGE: &'static str = "quitting!";
 
     pub async fn new(
         input_filepath: Option<&Path>,
         jq_cli_args: &JqCliArgs,
-        query: Option<String>,
+        filter: Option<String>,
     ) -> Result<Self, Error> {
         let event_stream = EventStream::new();
         let input = Self::input(input_filepath).await?;
@@ -47,8 +44,8 @@ impl App {
         let interval = Self::interval();
         let jq_output = JqOutput::empty();
         let jq_outputs = Channel::new();
+        let line_editor_set = LineEditorSet::new(jq_cli_args, filter);
         let rect_set = RectSet::empty();
-        let text_state_set = TextStateSet::new(jq_cli_args, query);
         let app = Self {
             event_stream,
             input,
@@ -56,8 +53,8 @@ impl App {
             interval,
             jq_output,
             jq_outputs,
+            line_editor_set,
             rect_set,
-            text_state_set,
         };
 
         app.ok()
@@ -95,41 +92,14 @@ impl App {
         Self::render_scroll_view(frame, rect, Self::OUTPUT_BLOCK_TITLE, self.jq_output.scroll_view_mut());
     }
 
-    // NOTE:
-    // - [https://docs.rs/tui-prompts/0.5.0/src/tui_prompts/text_prompt.rs.html#75] TextPrompt.draw() calls frame.set_cursor_position()
-    // - [https://docs.rs/tui-prompts/0.5.0/src/tui_prompts/text_prompt.rs.html#86] TextPrompt.render() mutates TextState cursor field
-    // - [https://docs.rs/tui-prompts/0.5.0/src/tui_prompts/prompt.rs.html#183] TextState.push() mutates TextState.position field
-    // - i choose to render the cursor separately as i want to keep the terminal's actual cursor hidden
-    fn render_text_state(frame: &mut Frame, rect: Rect, text_state: &TextState, title: &str) {
-        let query_str = text_state.value();
-        let cursor_begin = text_state.position();
-        let cursor_end = cursor_begin.saturating_add(1);
-        let before_cursor_str_span = query_str.substring(..cursor_begin).reset();
-        let cursor_str = query_str.substring(cursor_begin..cursor_end);
-        let cursor_str = if cursor_str.is_empty() { " " } else { cursor_str };
-        let cursor_str_span = if text_state.is_focused() {
-            cursor_str.reversed()
-        } else {
-            cursor_str.reset()
-        };
-        let after_cursor_str_span = query_str.substring(cursor_end..).reset();
-        let spans = std::vec![before_cursor_str_span, cursor_str_span, after_cursor_str_span];
-
-        spans
-            .convert::<Line>()
-            .paragraph()
-            .bordered_block(title)
-            .render_to(frame, rect);
+    #[tracing::instrument(skip_all)]
+    fn render_cli_flags(&self, frame: &mut Frame, rect: Rect) {
+        self.line_editor_set.cli_flags().text_area().render_to(frame, rect);
     }
 
     #[tracing::instrument(skip_all)]
-    fn render_flags(&self, frame: &mut Frame, rect: Rect) {
-        Self::render_text_state(frame, rect, self.text_state_set.flags(), Self::FLAGS_BLOCK_TITLE);
-    }
-
-    #[tracing::instrument(skip_all)]
-    fn render_query(&self, frame: &mut Frame, rect: Rect) {
-        Self::render_text_state(frame, rect, self.text_state_set.query(), Self::QUERY_BLOCK_TITLE);
+    fn render_filter(&self, frame: &mut Frame, rect: Rect) {
+        self.line_editor_set.filter().text_area().render_to(frame, rect);
     }
 
     #[tracing::instrument(skip_all)]
@@ -138,14 +108,14 @@ impl App {
 
         self.render_input(frame, self.rect_set.input);
         self.render_output(frame, self.rect_set.output);
-        self.render_query(frame, self.rect_set.query);
-        self.render_flags(frame, self.rect_set.flags);
+        self.render_filter(frame, self.rect_set.filter);
+        self.render_cli_flags(frame, self.rect_set.cli_flags);
     }
 
     fn spawn_jq_process(&self) -> Result<(), Error> {
         JqProcessBuilder {
-            flags: self.text_state_set.flags().value(),
-            query: self.text_state_set.query().value(),
+            cli_flags: self.line_editor_set.cli_flags().content(),
+            filter: self.line_editor_set.filter().content(),
             input: self.input_scroll_view.content().as_bytes(),
             jq_outputs_sender: self.jq_outputs.sender.clone(),
         }
@@ -163,7 +133,6 @@ impl App {
                 modifiers: KeyModifiers::CONTROL,
                 ..
             } => anyhow::bail!(Self::QUIT_MESSAGE),
-            KeyEvent { code: KeyCode::Tab, .. } => self.text_state_set.toggle_focus().none().ok(),
             KeyEvent {
                 code: KeyCode::Enter, ..
             } => {
@@ -174,7 +143,7 @@ impl App {
                 self.jq_output.scroll_view_mut().take_content().some().ok()
             }
             _key_event => {
-                if self.text_state_set.handle_key_event(*key_event) {
+                if self.line_editor_set.handle_key_event(*key_event) {
                     self.spawn_jq_process()?;
                 }
 

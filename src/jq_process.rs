@@ -43,24 +43,25 @@ impl JqOutput {
 }
 
 pub struct JqProcessBuilder<'a> {
-    pub flags: &'a str,
-    pub query: &'a str,
+    pub cli_flags: &'a str,
+    pub filter: &'a str,
     pub input: &'a [u8],
     pub jq_outputs_sender: UnboundedSender<JqOutput>,
 }
 
 impl<'a> JqProcessBuilder<'a> {
     const JQ_EXECUTABLE_NAME: &'static str = "jq";
-    const DEFAULT_QUERY: &'static str = ".";
+    const DEFAULT_FILTER: &'static str = ".";
 
     // TODO-d9feca: figure out why ok_or_error requires turbofish
     pub fn build(self) -> Result<JqProcess, Error> {
         let instant = Instant::now();
-        let args = shlex::split(self.flags).ok_or_error::<Vec<String>>("unable to split flags for the shell")?;
-        let query = if self.query.is_empty() {
-            Self::DEFAULT_QUERY
+        let args =
+            shlex::split(self.cli_flags).ok_or_error::<Vec<String>>("unable to split cli-flags for the shell")?;
+        let filter = if self.filter.is_empty() {
+            Self::DEFAULT_FILTER
         } else {
-            self.query
+            self.filter
         };
         let mut command = Command::new(Self::JQ_EXECUTABLE_NAME);
         let input = self.input.to_vec();
@@ -68,7 +69,7 @@ impl<'a> JqProcessBuilder<'a> {
 
         command
             .args(args)
-            .arg(query)
+            .arg(filter)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
