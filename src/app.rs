@@ -12,7 +12,7 @@ use crate::{
 use anyhow::Error;
 use crossterm::event::{Event, EventStream, KeyCode, KeyEvent, KeyModifiers, MouseEvent};
 use futures::StreamExt;
-use ratatui::{layout::Rect, Frame};
+use ratatui::{layout::Rect, style::Color, Frame};
 use std::{io::Error as IoError, path::Path, time::Duration};
 use tokio::time::Interval;
 
@@ -22,12 +22,15 @@ pub struct App {
     input_scroll_view: ScrollView,
     interval: Interval,
     jq_output: JqOutput,
-    jq_outputs: Channel<JqOutput>,
+    jq_outputs: Channel<Result<JqOutput, Error>>,
     line_editor_set: LineEditorSet,
+    output_block_color: Color,
     rect_set: RectSet,
 }
 
 impl App {
+    const COLOR_SUCCESS: Color = Color::Reset;
+    const COLOR_ERROR: Color = Color::Red;
     const INPUT_BLOCK_TITLE: &'static str = "INPUT";
     const INTERVAL_DURATION: Duration = Duration::from_millis(50);
     const OUTPUT_BLOCK_TITLE: &'static str = "OUTPUT";
@@ -45,6 +48,7 @@ impl App {
         let jq_output = JqOutput::empty();
         let jq_outputs = Channel::new();
         let line_editor_set = LineEditorSet::new(jq_cli_args, filter);
+        let output_block_color = Self::COLOR_SUCCESS;
         let rect_set = RectSet::empty();
         let app = Self {
             event_stream,
@@ -54,6 +58,7 @@ impl App {
             jq_output,
             jq_outputs,
             line_editor_set,
+            output_block_color,
             rect_set,
         };
 
@@ -77,39 +82,57 @@ impl App {
         tokio::time::interval(Self::INTERVAL_DURATION)
     }
 
-    fn render_scroll_view(frame: &mut Frame, rect: Rect, title: &str, scroll_view: &mut ScrollView) {
+    fn render_scroll_view(frame: &mut Frame, rect: Rect, title: &str, color: Color, scroll_view: &mut ScrollView) {
         scroll_view.render(frame, rect.decrement());
-        title.block().render_to(frame, rect);
+        title.block().border_style(color).render_to(frame, rect);
     }
 
     #[tracing::instrument(skip_all)]
-    fn render_input(&mut self, frame: &mut Frame, rect: Rect) {
-        Self::render_scroll_view(frame, rect, Self::INPUT_BLOCK_TITLE, &mut self.input_scroll_view);
+    fn render_input(&mut self, frame: &mut Frame) {
+        Self::render_scroll_view(
+            frame,
+            self.rect_set.input,
+            Self::INPUT_BLOCK_TITLE,
+            Self::COLOR_SUCCESS,
+            &mut self.input_scroll_view,
+        );
     }
 
     #[tracing::instrument(skip_all)]
-    fn render_output(&mut self, frame: &mut Frame, rect: Rect) {
-        Self::render_scroll_view(frame, rect, Self::OUTPUT_BLOCK_TITLE, self.jq_output.scroll_view_mut());
+    fn render_output(&mut self, frame: &mut Frame) {
+        Self::render_scroll_view(
+            frame,
+            self.rect_set.output,
+            Self::OUTPUT_BLOCK_TITLE,
+            self.output_block_color,
+            self.jq_output.scroll_view_mut(),
+        );
     }
 
     #[tracing::instrument(skip_all)]
-    fn render_cli_flags(&self, frame: &mut Frame, rect: Rect) {
-        self.line_editor_set.cli_flags().text_area().render_to(frame, rect);
+    fn render_cli_flags(&self, frame: &mut Frame) {
+        self.line_editor_set
+            .cli_flags()
+            .text_area()
+            .render_to(frame, self.rect_set.cli_flags);
     }
 
     #[tracing::instrument(skip_all)]
-    fn render_filter(&self, frame: &mut Frame, rect: Rect) {
-        self.line_editor_set.filter().text_area().render_to(frame, rect);
+    fn render_filter(&self, frame: &mut Frame) {
+        self.line_editor_set
+            .filter()
+            .text_area()
+            .render_to(frame, self.rect_set.filter);
     }
 
     #[tracing::instrument(skip_all)]
     fn render(&mut self, frame: &mut Frame) {
         self.rect_set = RectSet::new(frame.area());
 
-        self.render_input(frame, self.rect_set.input);
-        self.render_output(frame, self.rect_set.output);
-        self.render_filter(frame, self.rect_set.filter);
-        self.render_cli_flags(frame, self.rect_set.cli_flags);
+        self.render_input(frame);
+        self.render_output(frame);
+        self.render_filter(frame);
+        self.render_cli_flags(frame);
     }
 
     fn spawn_jq_process(&self) -> Result<(), Error> {
@@ -165,6 +188,28 @@ impl App {
         .handle_mouse_event(mouse_event);
     }
 
+    fn handle_jq_output(&mut self, jq_output_res: Result<JqOutput, Error>) {
+        let jq_output = match jq_output_res {
+            Ok(jq_output) => {
+                self.output_block_color = Self::COLOR_SUCCESS;
+
+                jq_output
+            }
+            Err(err) => {
+                self.output_block_color = Self::COLOR_ERROR;
+
+                err.log_error();
+
+                return;
+            }
+        };
+
+        // NOTE: keep scroll offset if the output changes
+        if self.jq_output.instant() < jq_output.instant() {
+            self.jq_output = jq_output.with_scroll_view_offset(&self.jq_output);
+        }
+    }
+
     // NOTE:
     // - Ok(Some(output)) => exit program successfully with the given output
     // - Ok(None) => ignore the given input and continue running the program
@@ -191,12 +236,7 @@ impl App {
                     self.input_scroll_view.extend(&lines_res?);
                     self.spawn_jq_process()?;
                 }
-                jq_output = self.jq_outputs.receiver.recv().unwrap_or_pending() => {
-                    // NOTE: keep scroll offset if the output changes
-                    if self.jq_output.instant() < jq_output.instant() {
-                        self.jq_output = jq_output.with_scroll_view_offset(&self.jq_output);
-                    }
-                }
+                jq_output_res = self.jq_outputs.receiver.recv().unwrap_or_pending() => self.handle_jq_output(jq_output_res),
                 event_res = self.event_stream.next().unwrap_or_pending() => {
                     if let Some(output_content) = self.handle_event(&event_res?).await? {
                         return output_content.ok();

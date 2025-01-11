@@ -46,7 +46,7 @@ pub struct JqProcessBuilder<'a> {
     pub cli_flags: &'a str,
     pub filter: &'a str,
     pub input: &'a [u8],
-    pub jq_outputs_sender: UnboundedSender<JqOutput>,
+    pub jq_outputs_sender: UnboundedSender<Result<JqOutput, Error>>,
 }
 
 impl<'a> JqProcessBuilder<'a> {
@@ -88,7 +88,7 @@ pub struct JqProcess {
     instant: Instant,
     command: Command,
     input: Vec<u8>,
-    jq_outputs_sender: UnboundedSender<JqOutput>,
+    jq_outputs_sender: UnboundedSender<Result<JqOutput, Error>>,
 }
 
 impl JqProcess {
@@ -119,7 +119,7 @@ impl JqProcess {
     // - figure out how to cancel previously started processes
     //   - some join!(command, other) type thing where other can be set or told to cancel on updates/new calls to
     //     this function
-    async fn run_helper(mut self) -> Result<(), Error> {
+    async fn jq_output(&mut self) -> Result<JqOutput, Error> {
         let mut child = self.command.spawn()?;
         let stdin = child.stdin.take().ok_or_error::<ChildStdin>("unable to get stdin")?;
         let stdout = child.stdout.take().ok_or_error::<ChildStdout>("unable to get stdout")?;
@@ -135,13 +135,13 @@ impl JqProcess {
 
         let jq_output = JqOutput::new(self.instant, &content.into_string()?);
 
-        self.jq_outputs_sender.send(jq_output)?;
-
-        ().ok()
+        jq_output.ok()
     }
 
     #[tracing::instrument(skip_all)]
-    pub async fn run(self) {
-        self.run_helper().await.log_if_error();
+    pub async fn run(mut self) {
+        let jq_output_res = self.jq_output().await;
+
+        self.jq_outputs_sender.send(jq_output_res).log_if_error();
     }
 }
