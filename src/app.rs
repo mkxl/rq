@@ -198,9 +198,7 @@ impl App {
             Err(err) => {
                 self.output_block_color = Self::COLOR_ERROR;
 
-                err.log_error();
-
-                return;
+                return err.log_error();
             }
         };
 

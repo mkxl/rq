@@ -119,6 +119,7 @@ impl JqProcess {
     // - figure out how to cancel previously started processes
     //   - some join!(command, other) type thing where other can be set or told to cancel on updates/new calls to
     //     this function
+    #[tracing::instrument(skip(self), fields(command = ?self.command), err)]
     async fn jq_output(&mut self) -> Result<JqOutput, Error> {
         let mut child = self.command.spawn()?;
         let stdin = child.stdin.take().ok_or_error::<ChildStdin>("unable to get stdin")?;
@@ -131,14 +132,16 @@ impl JqProcess {
 
         let output = child.wait_with_output().await?;
 
-        anyhow::ensure!(output.status.success(), output.stderr.into_string()?);
+        anyhow::ensure!(
+            output.status.success(),
+            "[{status}] {stderr:?}",
+            status = output.status,
+            stderr = output.stderr.to_str()?
+        );
 
-        let jq_output = JqOutput::new(self.instant, &content.into_string()?);
-
-        jq_output.ok()
+        JqOutput::new(self.instant, content.to_str()?).ok()
     }
 
-    #[tracing::instrument(skip_all)]
     pub async fn run(mut self) {
         let jq_output_res = self.jq_output().await;
 

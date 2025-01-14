@@ -15,7 +15,7 @@ use std::{
     io::Error as IoError,
     ops::{Bound, Range, RangeBounds},
     path::Path,
-    string::FromUtf8Error,
+    str::Utf8Error,
 };
 use tokio::{
     fs::File,
@@ -120,13 +120,6 @@ pub trait Any {
         let new_value = new_min + (new_max - new_min) * (old_value - old_min) / (old_max - old_min);
 
         new_value.clamp(new_min, new_max).round().cast()
-    }
-
-    fn into_string(self) -> Result<String, FromUtf8Error>
-    where
-        Self: Into<Vec<u8>>,
-    {
-        String::from_utf8(self.into())
     }
 
     fn left<R>(self) -> Either<Self, R>
@@ -282,6 +275,13 @@ pub trait Any {
             Some(((begin_idx, _begin_substr), (last_idx, _last_substr))) => &text[begin_idx..=last_idx],
             None => "",
         }
+    }
+
+    fn to_str(&self) -> Result<&str, Utf8Error>
+    where
+        Self: AsRef<[u8]>,
+    {
+        std::str::from_utf8(self.as_ref())
     }
 
     fn unit(&self) {}
