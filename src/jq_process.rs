@@ -1,15 +1,7 @@
 use crate::{any::Any, scroll::ScrollView};
 use anyhow::Error;
-use std::{
-    io::Error as IoError,
-    process::Stdio,
-    time::{Duration, Instant},
-};
-use tokio::{
-    io::AsyncReadExt,
-    process::{ChildStdin, ChildStdout, Command},
-    sync::mpsc::UnboundedSender,
-};
+use std::{process::Stdio, time::Instant};
+use tokio::{process::Command, sync::mpsc::UnboundedSender};
 
 pub struct JqOutput {
     instant: Instant,
@@ -64,20 +56,18 @@ impl<'a> JqProcessBuilder<'a> {
             self.filter
         };
         let mut command = Command::new(Self::JQ_EXECUTABLE_NAME);
-        let input = self.input.to_vec();
         let jq_outputs_sender = self.jq_outputs_sender;
 
         command
             .args(args)
             .arg(filter)
-            .stdin(Stdio::piped())
+            .stdin(self.input.tempfile()?)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         JqProcess {
             instant,
             command,
-            input,
             jq_outputs_sender,
         }
         .ok()
@@ -87,32 +77,10 @@ impl<'a> JqProcessBuilder<'a> {
 pub struct JqProcess {
     instant: Instant,
     command: Command,
-    input: Vec<u8>,
     jq_outputs_sender: UnboundedSender<Result<JqOutput, Error>>,
 }
 
 impl JqProcess {
-    const POST_WRITE_SLEEP_DURATION: Duration = Duration::from_millis(5);
-
-    // NOTE: loop stdout.read_buf() rather than a single call to stdout.read_to_end() to not end early if 0 bytes are
-    // read
-    async fn read(mut stdout: ChildStdout, content: &mut Vec<u8>) -> Result<(), IoError> {
-        loop {
-            stdout.read_buf(content).await?;
-        }
-    }
-
-    // NOTE:
-    // - both std::mem::drop() and tokio::time::sleep() seem to be necessary to get the output to render
-    // - Self::POST_WRITE_SLEEP_DURATION chosen based off trial and error
-    async fn write(mut stdin: ChildStdin, input: &[u8]) -> Result<(), IoError> {
-        stdin.write_all_and_flush(input).await?;
-        std::mem::drop(stdin);
-        tokio::time::sleep(Self::POST_WRITE_SLEEP_DURATION).await;
-
-        ().ok()
-    }
-
     // TODO:
     // - TODO-d9feca
     // - determine if this is useful: [https://docs.rs/tokio/latest/tokio/process/index.html#droppingcancellation]
@@ -121,16 +89,7 @@ impl JqProcess {
     //     this function
     #[tracing::instrument(skip(self), fields(command = ?self.command), err)]
     async fn jq_output(&mut self) -> Result<JqOutput, Error> {
-        let mut child = self.command.spawn()?;
-        let stdin = child.stdin.take().ok_or_error::<ChildStdin>("unable to get stdin")?;
-        let stdout = child.stdout.take().ok_or_error::<ChildStdout>("unable to get stdout")?;
-        let mut content = Vec::new();
-        let read = Self::read(stdout, &mut content);
-        let write = Self::write(stdin, &self.input);
-
-        Self::select(read, write).await?;
-
-        let output = child.wait_with_output().await?;
+        let output = self.command.output().await?;
 
         anyhow::ensure!(
             output.status.success(),
@@ -139,7 +98,7 @@ impl JqProcess {
             stderr = output.stderr.to_str()?
         );
 
-        JqOutput::new(self.instant, content.to_str()?).ok()
+        JqOutput::new(self.instant, output.stdout.to_str()?).ok()
     }
 
     pub async fn run(mut self) {

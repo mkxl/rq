@@ -11,8 +11,9 @@ use ratatui::{
 };
 use std::{
     fmt::Display,
+    fs::File as FileStd,
     future::Future,
-    io::Error as IoError,
+    io::{Error as IoError, Seek, Write},
     ops::{Bound, Range, RangeBounds},
     path::Path,
     str::Utf8Error,
@@ -240,13 +241,6 @@ pub trait Any {
         *self = self.saturating_sub(&rhs).min(max_value);
     }
 
-    async fn select<T, F1: Future<Output = T>, F2: Future<Output = T>>(fut_1: F1, fut_2: F2) -> T {
-        tokio::select! {
-            output = fut_1 => output,
-            output = fut_2 => output,
-        }
-    }
-
     fn some(self) -> Option<Self>
     where
         Self: Sized,
@@ -275,6 +269,19 @@ pub trait Any {
             Some(((begin_idx, _begin_substr), (last_idx, _last_substr))) => &text[begin_idx..=last_idx],
             None => "",
         }
+    }
+
+    fn tempfile(&self) -> Result<FileStd, IoError>
+    where
+        Self: AsRef<[u8]>,
+    {
+        let mut file = tempfile::tempfile()?;
+
+        file.write_all(self.as_ref())?;
+        file.flush()?;
+        file.rewind()?;
+
+        file.ok()
     }
 
     fn to_str(&self) -> Result<&str, Utf8Error>
